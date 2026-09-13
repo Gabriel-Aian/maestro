@@ -52,12 +52,29 @@ jobs:
       # <novo-major>.<novo-minor>.<run_number>, que já derrota qualquer
       # 0.<minor-antigo>.<run_number-antigo>.
       - name: Definir versão desta Release
+        id: version
         shell: bash
         run: |
           base=$(node -p "require('./package.json').version.split('.').slice(0, 2).join('.')")
           version="${base}.${{ github.run_number }}"
           npm pkg set version="$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Publicando versão $version"
+
+      # `releaseType: release` (electron-builder.yml) publica a Release direto,
+      # sem passar por rascunho — mas a API do GitHub rejeita criar uma Release
+      # já publicada para uma tag que ainda não existe ("Published releases
+      # must have a valid tag", 422). Visto ao vivo na primeira tentativa: sem
+      # tag pré-existente, os dois artefatos que o electron-builder sobe em
+      # paralelo (o .exe e o .exe.blockmap) corriam para criar a mesma Release
+      # ao mesmo tempo, e um dos dois perdia essa corrida e derrubava o job
+      # inteiro. Criar a tag aqui, antes do publish, faz o electron-builder
+      # sempre publicar contra uma tag que já existe — sem corrida para criar.
+      - name: Criar tag da versão
+        shell: bash
+        run: |
+          git tag "v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
 
       - name: Build e publicar instalador
         run: npm run package:win:publish
