@@ -1,0 +1,40 @@
+{
+  "name": "maestro-core",
+  "version": "0.3.0",
+  "description": "Núcleo de automação web do Maestro — gravador, replay e motor de pesquisas",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "cli": "node dist/cli.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "commander": "^15.0.0",
+    "node-cron": "^4.6.0",
+    "pino": "^10.3.1",
+    "playwright-core": "^1.63.0",
+    "zod": "^4.6.2"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^30.0.0",
+    "@types/node": "^22.20.2",
+    "jsdom": "^30.0.1",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  },
+  "type": "module",
+  "bin": {
+    "maestro": "./dist/cli.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  }
+}

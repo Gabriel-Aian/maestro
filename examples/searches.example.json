@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "defaults": {
+    "browser": "brave",
+    "profile": "conta-1",
+    "engine": "google",
+    "headless": true,
+    "delayBetweenSearchesMs": [5000, 15000],
+    "screenshot": "none",
+    "maxRetries": 2
+  },
+  "themes": [
+    {
+      "id": "tema-tecnologia",
+      "name": "Tecnologia",
+      "enabled": true,
+      "queries": [
+        "playwright automação windows",
+        "chrome devtools protocol tutorial",
+        {
+          "text": "melhor {ferramenta} para {objetivo}",
+          "vars": {
+            "ferramenta": ["playwright", "puppeteer"],
+            "objetivo": ["teste e2e", "scraping"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "tema-mercado",
+      "name": "Mercado",
+      "enabled": true,
+      "engine": "bing",
+      "profile": "conta-2",
+      "delayBetweenSearchesMs": [8000, 20000],
+      "queries": [
+        "tendências automação rpa 2026",
+        { "text": "relatório setor {setor}", "vars": { "setor": ["logística", "varejo"] }, "repeat": 2 }
+      ]
+    },
+    {
+      "id": "tema-arquivado",
+      "name": "Arquivado",
+      "enabled": false,
+      "queries": ["esse tema fica salvo mas não executa"]
+    }
+  ]
+}
