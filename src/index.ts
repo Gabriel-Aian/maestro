@@ -20,3 +20,4 @@ export { profiles, flowsIndex, runs, schedules, getDb, type FlowIndexRow } from 
 export { isDue, minuteKey, runDueSchedules, type ScheduleEnqueuer, type TickResult } from './scheduler/scheduler.js';
 export { installWindowsTask, uninstallWindowsTask, windowsTaskStatus, buildInstallArgs, TICK_TASK_NAME } from './scheduler/windowsTask.js';
 export { paths } from './config/paths.js';
+export { formatError } from './errors.js';

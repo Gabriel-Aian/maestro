@@ -33,6 +33,14 @@ export interface InstallTaskOptions {
   nodePath?: string;
   /** Para testes/inspeção: caminho do cli.js a usar em vez de process.argv[1]. */
   cliPath?: string;
+  /**
+   * Variáveis de ambiente para a invocação do tick. Hoje só a GUI
+   * empacotada usa isto — para rodar o próprio executável do Maestro no
+   * lugar de um `node` separado, precisa de `ELECTRON_RUN_AS_NODE=1`
+   * (ver `nodePath` abaixo). `schtasks /tr` só aceita uma linha de comando
+   * sem campo de ambiente, daí o `set K=V&&` embrulhado num `cmd.exe /c`.
+   */
+  env?: Record<string, string>;
 }
 
 /**
@@ -50,11 +58,27 @@ export interface InstallTaskOptions {
  * inteiro (`npm install`, `npm run build`). Mesmo raciocínio não se aplica a
  * `cliPath`: `process.argv[1]` só é confiável quando quem chama é a própria
  * CLI — a Electron passa sempre um `cliPath` explícito.
+ *
+ * Uma vez empacotado (electron-builder), não há garantia de que o usuário
+ * final tenha `node` na PATH — é um app de GUI, não uma ferramenta de
+ * desenvolvedor. Nesse caso a GUI passa `nodePath: process.execPath` (o
+ * próprio `Maestro.exe`) e `env: { ELECTRON_RUN_AS_NODE: '1' }`: o binário do
+ * Electron já embute um runtime Node completo, e essa variável faz ele se
+ * comportar como `node` puro em vez de abrir uma janela — confirmado ao vivo
+ * neste ambiente (`ELECTRON_RUN_AS_NODE=1 electron dist/cli.js schedule
+ * tick` roda igual a `node dist/cli.js schedule tick`, `node:sqlite`
+ * incluído). Ver `electron/main/schedulesIpc.ts`.
  */
-export function buildTickCommand(opts: { nodePath?: string; cliPath?: string } = {}): string {
+export function buildTickCommand(opts: { nodePath?: string; cliPath?: string; env?: Record<string, string> } = {}): string {
   const node = opts.nodePath ?? 'node';
   const cli = opts.cliPath ?? resolve(process.argv[1] ?? 'dist/cli.js');
-  return `"${node}" "${cli}" schedule tick`;
+  const command = `"${node}" "${cli}" schedule tick`;
+
+  const envEntries = Object.entries(opts.env ?? {});
+  if (envEntries.length === 0) return command;
+
+  const envPrefix = envEntries.map(([key, value]) => `set ${key}=${value}&&`).join('');
+  return `cmd.exe /c "${envPrefix}${command}"`;
 }
 
 /**

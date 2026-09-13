@@ -3,12 +3,12 @@ import { randomUUID } from 'node:crypto';
 import {
   ProfileSchema,
   detectBrowsers,
+  formatError,
   isProfileLocked,
   loadConfig,
   openProfilePlain,
   paths,
   profiles,
-  saveConfig,
   validateBrowserPath,
   type Profile,
 } from '../../src/index.js';
@@ -61,12 +61,16 @@ function toProfileView(p: Profile): ProfileView {
 export function registerProfileIpcHandlers(): void {
   ipcMain.handle('maestro:browsers:list', () => listBrowserViews());
 
-  ipcMain.handle('maestro:browsers:addPath', (_event, input: { id: string; path: string }): ActionResult => {
+  ipcMain.handle('maestro:browsers:addPath', async (_event, input: { id: string; path: string }): Promise<ActionResult> => {
     const validation = validateBrowserPath(input.path);
     if (!validation.ok) return { ok: false, reason: validation.reason };
 
-    const config = loadConfig();
-    saveConfig({ ...config, browserPaths: { ...config.browserPaths, [input.id]: input.path } });
+    // Passa por Maestro.updateConfig() (não loadConfig()/saveConfig() direto)
+    // para o caminho novo valer JÁ na instância rodando, sem reiniciar o app
+    // — antes disso, um perfil só conseguia usar o navegador recém-cadastrado
+    // depois de fechar e reabrir a janela.
+    const maestro = getMaestro();
+    await maestro.updateConfig({ ...maestro.config, browserPaths: { ...maestro.config.browserPaths, [input.id]: input.path } });
     return { ok: true };
   });
 
@@ -107,7 +111,7 @@ export function registerProfileIpcHandlers(): void {
         url: input.url,
       });
     } catch (err) {
-      return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+      return { ok: false, reason: formatError(err) };
     }
 
     openLoginWidget(profile.id, profile.name);

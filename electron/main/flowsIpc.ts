@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron';
-import { describeCandidate, flowsIndex, loadFlow, runs, type Flow, type FlowStep } from '../../src/index.js';
+import { describeCandidate, flowsIndex, formatError, loadFlow, runs, type Flow, type FlowStep } from '../../src/index.js';
 import { getMaestro } from './maestro.js';
 import type {
   FlowDetailView,
@@ -102,7 +102,7 @@ export function registerFlowIpcHandlers(): void {
         });
         return { ok: true, jobId: job.id };
       } catch (err) {
-        return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+        return { ok: false, reason: formatError(err) };
       }
     },
   );

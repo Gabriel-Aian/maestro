@@ -251,3 +251,30 @@ export type PickScheduleSearchFileResult = { ok: true; filePath: string; themes:
  */
 export type WindowsTaskStatusResult = { ok: true; installed: boolean; raw?: string } | { ok: false; reason: string };
 export type WindowsTaskActionResult = { ok: true } | { ok: false; reason: string };
+
+/* ─────────────────────────  CONFIGURAÇÕES  ───────────────────────── */
+
+/**
+ * Espelha `AppConfig` (`src/types/schema.ts`) achatado para IPC — mesmo
+ * padrão de todo o resto deste arquivo (nenhum tipo do núcleo cruza a ponte
+ * direto). Campos aqui divididos em dois grupos na tela: os lidos "ao vivo"
+ * a cada job (a maioria) e os congelados na construção do `Maestro`
+ * (`maxConcurrentBrowsers`, `jobTimeoutMs`, `jobDelayMs`, `browserIdleTtlMs`
+ * — só valem depois de reiniciar o app).
+ */
+export interface AppConfigView {
+  defaultHeadless: boolean;
+  defaultTimeoutMs: number;
+  defaultMaxRetries: number;
+  defaultViewport: { width: number; height: number };
+  maxConcurrentBrowsers: number;
+  jobTimeoutMs: number;
+  browserIdleTtlMs: number;
+  defaultStepDelayMs: [number, number];
+  jobDelayMs: [number, number];
+  retention: { maxAgeDays: number; maxRuns: number; failureMultiplier: number; diskWarningMb: number };
+  captureTrace: boolean;
+  detectLoginWall: boolean;
+}
+
+export type UpdateConfigResult = { ok: true; config: AppConfigView } | { ok: false; reason: string };
