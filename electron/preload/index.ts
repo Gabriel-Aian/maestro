@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
   PROFILES_EVENT_CHANNEL,
   QUEUE_EVENT_CHANNEL,
+  UPDATE_EVENT_CHANNEL,
   type ActionResult,
   type AddProfileResult,
   type AppConfigView,
@@ -26,6 +27,7 @@ import {
   type ScheduleView,
   type StatusView,
   type UpdateConfigResult,
+  type UpdateStatus,
   type WindowsTaskActionResult,
   type WindowsTaskStatusResult,
 } from '../shared/ipc.js';
@@ -77,8 +79,8 @@ const api = {
   pickSearchFile: (): Promise<LoadSearchFileResult | null> => ipcRenderer.invoke('maestro:search:pickFile'),
   reloadSearchFile: (filePath: string): Promise<LoadSearchFileResult> => ipcRenderer.invoke('maestro:search:reload', filePath),
   openSearchFileFolder: (filePath: string): Promise<void> => ipcRenderer.invoke('maestro:search:openFolder', filePath),
-  runSearch: (filePath: string, themeIds: string[]): Promise<RunSearchResult> =>
-    ipcRenderer.invoke('maestro:search:run', { filePath, themeIds }),
+  runSearch: (filePath: string, themeIds: string[], sampleSize?: number): Promise<RunSearchResult> =>
+    ipcRenderer.invoke('maestro:search:run', { filePath, themeIds, sampleSize }),
 
   listSchedules: (): Promise<ScheduleView[]> => ipcRenderer.invoke('maestro:schedules:list'),
   pickScheduleSearchFile: (): Promise<PickScheduleSearchFileResult | null> => ipcRenderer.invoke('maestro:schedules:pickSearchFile'),
@@ -97,6 +99,11 @@ const api = {
   getConfig: (): Promise<AppConfigView> => ipcRenderer.invoke('maestro:config:get'),
   getDefaultConfig: (): Promise<AppConfigView> => ipcRenderer.invoke('maestro:config:defaults'),
   updateConfig: (config: AppConfigView): Promise<UpdateConfigResult> => ipcRenderer.invoke('maestro:config:update', config),
+
+  checkForUpdates: (): Promise<UpdateStatus> => ipcRenderer.invoke('maestro:updates:check'),
+  getUpdateStatus: (): Promise<UpdateStatus> => ipcRenderer.invoke('maestro:updates:status'),
+  installUpdate: (): Promise<void> => ipcRenderer.invoke('maestro:updates:install'),
+  onUpdateEvent: (callback: (status: UpdateStatus) => void): (() => void) => subscribe(UPDATE_EVENT_CHANNEL, callback),
 };
 
 contextBridge.exposeInMainWorld('maestro', api);

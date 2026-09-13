@@ -129,10 +129,10 @@ export class Maestro {
    */
   enqueueSearches(
     searchFilePath: string,
-    opts: { themeIds?: string[]; priority?: number; forceHeadless?: boolean; scheduleId?: string } = {},
+    opts: { themeIds?: string[]; sampleSize?: number; priority?: number; forceHeadless?: boolean; scheduleId?: string } = {},
   ): Job[] {
     const file = loadSearchFile(searchFilePath);
-    const searches = expandSearches(file, { themeIds: opts.themeIds });
+    const searches = expandSearches(file, { themeIds: opts.themeIds, sampleSize: opts.sampleSize });
 
     if (searches.length === 0) {
       throw new Error('Nenhuma pesquisa ativa encontrada. Verifique se os temas estão habilitados (RN-009).');
@@ -189,6 +189,7 @@ export class Maestro {
 
     return this.enqueueSearches(schedule.target.searchFile, {
       themeIds: schedule.target.themeIds,
+      sampleSize: schedule.target.sampleSize,
       forceHeadless: true,
       scheduleId: schedule.id,
     });

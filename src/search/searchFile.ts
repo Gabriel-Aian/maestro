@@ -98,7 +98,7 @@ function expandVars(text: string, vars: Record<string, string[]> | undefined): s
  * herança `defaults → tema → query` e expandindo variáveis e repetições.
  * Temas desativados são ignorados aqui, mas permanecem no arquivo (RN-009).
  */
-export function expandSearches(file: SearchFile, opts: { themeIds?: string[] } = {}): ResolvedSearch[] {
+export function expandSearches(file: SearchFile, opts: { themeIds?: string[]; sampleSize?: number } = {}): ResolvedSearch[] {
   const out: ResolvedSearch[] = [];
   const filter = opts.themeIds ? new Set(opts.themeIds) : null;
 
@@ -108,7 +108,28 @@ export function expandSearches(file: SearchFile, opts: { themeIds?: string[] } =
     out.push(...expandTheme(theme, file));
   }
 
+  // `sampleSize` limita a execução a N pesquisas sorteadas do total já
+  // filtrado, sem repetir nenhuma dentro dessa mesma execução — pedido para
+  // não precisar rodar as centenas de pesquisas do arquivo de uma vez só.
+  // `undefined` (o padrão) preserva o comportamento de sempre: todas as
+  // pesquisas ativas, na ordem do arquivo.
+  if (opts.sampleSize !== undefined && opts.sampleSize < out.length) {
+    return sampleWithoutReplacement(out, opts.sampleSize);
+  }
   return out;
+}
+
+/** Fisher–Yates parcial: embaralha só o necessário para tirar `n` itens sem repetir. */
+function sampleWithoutReplacement<T>(pool: T[], n: number): T[] {
+  const arr = [...pool];
+  const count = Math.min(Math.max(n, 0), arr.length);
+  for (let i = 0; i < count; i += 1) {
+    const j = i + Math.floor(Math.random() * (arr.length - i));
+    const tmp = arr[i]!;
+    arr[i] = arr[j]!;
+    arr[j] = tmp;
+  }
+  return arr.slice(0, count);
 }
 
 function expandTheme(theme: Theme, file: SearchFile): ResolvedSearch[] {

@@ -63,7 +63,7 @@ function toTargetView(target: ScheduleTarget, allProfiles: Profile[], flows: Flo
       variables: target.variables,
     };
   }
-  return { kind: 'search', searchFile: target.searchFile, themeIds: target.themeIds ?? null };
+  return { kind: 'search', searchFile: target.searchFile, themeIds: target.themeIds ?? null, sampleSize: target.sampleSize ?? null };
 }
 
 function toScheduleView(s: Schedule, allProfiles: Profile[], flows: FlowIndexRow[]): ScheduleView {
@@ -163,7 +163,12 @@ export function registerScheduleIpcHandlers(): void {
         target = { kind: 'flow', flowId: input.target.flowId, profile: input.target.profileId, variables: input.target.variables };
       } else {
         loadSearchFile(input.target.searchFile); // valida o arquivo
-        target = { kind: 'search', searchFile: input.target.searchFile, themeIds: input.target.themeIds ?? undefined };
+        target = {
+          kind: 'search',
+          searchFile: input.target.searchFile,
+          themeIds: input.target.themeIds ?? undefined,
+          sampleSize: input.target.sampleSize ?? undefined,
+        };
       }
 
       const now = new Date().toISOString();

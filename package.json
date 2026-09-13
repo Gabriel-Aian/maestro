@@ -12,13 +12,15 @@
     "electron:dev": "electron-vite dev",
     "electron:build": "electron-vite build",
     "electron:preview": "electron-vite preview",
-    "package:win": "npm run build && npm run electron:build && electron-builder --win --publish=never"
+    "package:win": "npm run build && npm run electron:build && electron-builder --win --publish=never",
+    "package:win:publish": "npm run build && npm run electron:build && electron-builder --win --publish=always"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "commander": "^15.0.0",
+    "electron-updater": "^6.8.9",
     "node-cron": "^4.6.0",
     "pino": "^10.3.1",
     "playwright-core": "^1.63.0",

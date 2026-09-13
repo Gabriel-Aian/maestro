@@ -213,6 +213,8 @@ export interface ScheduleSearchTargetView {
   searchFile: string;
   /** null = todos os temas habilitados no arquivo, reavaliado a cada disparo. */
   themeIds: string[] | null;
+  /** null = roda todas as pesquisas filtradas; caso contrário, sorteia esse número sem repetir a cada disparo. */
+  sampleSize: number | null;
 }
 
 export type ScheduleTargetView = ScheduleFlowTargetView | ScheduleSearchTargetView;
@@ -234,7 +236,7 @@ export type CreateScheduleInput = {
   cron: string;
   target:
     | { kind: 'flow'; flowId: string; profileId: string; variables: Record<string, string> }
-    | { kind: 'search'; searchFile: string; themeIds: string[] | null };
+    | { kind: 'search'; searchFile: string; themeIds: string[] | null; sampleSize: number | null };
 };
 
 export type CreateScheduleResult = { ok: true; schedule: ScheduleView } | { ok: false; reason: string };
@@ -278,3 +280,23 @@ export interface AppConfigView {
 }
 
 export type UpdateConfigResult = { ok: true; config: AppConfigView } | { ok: false; reason: string };
+
+/* ─────────────────────────  ATUALIZAÇÕES  ───────────────────────── */
+
+/**
+ * Espelha os eventos de `electron-updater` — canal GitHub Releases público
+ * (ver `electron-builder.yml`). `downloading`/`downloaded` só ocorrem porque
+ * `autoDownload = true` (ver `electron/main/autoUpdate.ts` para o porquê de
+ * baixar sozinho mas nunca instalar sozinho).
+ */
+export type UpdateStatus =
+  | { state: 'unsupported'; reason: string }
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | { state: 'available'; version: string }
+  | { state: 'not-available' }
+  | { state: 'downloading'; version: string; percent: number }
+  | { state: 'downloaded'; version: string }
+  | { state: 'error'; message: string };
+
+export const UPDATE_EVENT_CHANNEL = 'maestro:updateEvent';

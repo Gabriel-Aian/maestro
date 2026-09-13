@@ -408,12 +408,17 @@ search
   .command('run <file>')
   .description('Executa as pesquisas do arquivo (RF-016 a RF-020)')
   .option('-t, --themes <ids>', 'restringe a temas específicos, separados por vírgula')
-  .action(async (file: string, opts: { themes?: string }) => {
+  .option('-n, --sample-size <n>', 'sorteia apenas N pesquisas do total (sem repetir), em vez de rodar todas')
+  .action(async (file: string, opts: { themes?: string; sampleSize?: string }) => {
     const maestro = new Maestro();
     await maestro.init();
 
     const themeIds = opts.themes?.split(',').map((t) => t.trim());
-    const jobs = maestro.enqueueSearches(file, { themeIds });
+    const sampleSize = opts.sampleSize ? Number(opts.sampleSize) : undefined;
+    if (sampleSize !== undefined && (!Number.isInteger(sampleSize) || sampleSize < 1)) {
+      fail('--sample-size precisa ser um número inteiro maior ou igual a 1.');
+    }
+    const jobs = maestro.enqueueSearches(file, { themeIds, sampleSize });
     ok(`${jobs.length} job(s) enfileirado(s), um por perfil.`);
 
     maestro.queue.on('finished', (_j, result) => {
@@ -462,10 +467,19 @@ schedule
   .option('--var <pares...>', 'variáveis do fluxo no formato nome=valor')
   .option('--search <file>', 'agenda um arquivo de pesquisas (exclusivo com --flow)')
   .option('--themes <ids>', 'restringe a temas específicos, separados por vírgula (com --search)')
+  .option('--sample-size <n>', 'sorteia apenas N pesquisas do total a cada disparo, sem repetir (com --search)')
   .action(
     (
       name: string,
-      opts: { cron: string; flow?: string; profile?: string; var?: string[]; search?: string; themes?: string },
+      opts: {
+        cron: string;
+        flow?: string;
+        profile?: string;
+        var?: string[];
+        search?: string;
+        themes?: string;
+        sampleSize?: string;
+      },
     ) => {
       if (Boolean(opts.flow) === Boolean(opts.search)) {
         fail('Informe exatamente um de --flow ou --search.');
@@ -480,7 +494,16 @@ schedule
       } else {
         if (!existsSync(opts.search!)) fail(`Arquivo não encontrado: ${opts.search}`);
         loadSearchFile(opts.search!); // valida o arquivo
-        target = { kind: 'search', searchFile: opts.search!, themeIds: opts.themes?.split(',').map((t) => t.trim()) };
+        const sampleSize = opts.sampleSize ? Number(opts.sampleSize) : undefined;
+        if (sampleSize !== undefined && (!Number.isInteger(sampleSize) || sampleSize < 1)) {
+          fail('--sample-size precisa ser um número inteiro maior ou igual a 1.');
+        }
+        target = {
+          kind: 'search',
+          searchFile: opts.search!,
+          themeIds: opts.themes?.split(',').map((t) => t.trim()),
+          sampleSize,
+        };
       }
 
       const now = new Date().toISOString();
@@ -525,7 +548,13 @@ schedule
     info(`\n${s.name}  (${s.id})`);
     info(`  Cron:      ${s.cron}`);
     info(`  Estado:    ${s.enabled ? 'ativo' : 'desativado'}`);
-    info(`  Alvo:      ${s.target.kind === 'flow' ? `fluxo ${s.target.flowId} (perfil ${s.target.profile})` : `pesquisas ${s.target.searchFile}${s.target.themeIds ? ` [${s.target.themeIds.join(', ')}]` : ''}`}`);
+    info(
+      `  Alvo:      ${
+        s.target.kind === 'flow'
+          ? `fluxo ${s.target.flowId} (perfil ${s.target.profile})`
+          : `pesquisas ${s.target.searchFile}${s.target.themeIds ? ` [${s.target.themeIds.join(', ')}]` : ''}${s.target.sampleSize ? ` — ${s.target.sampleSize} por disparo` : ''}`
+      }`,
+    );
     info(`  Última:    ${s.lastRunAt ? `${s.lastRunAt} — ${s.lastStatus}` : 'nunca rodou'}`);
     const next = nextRunOf(s.cron);
     info(`  Próxima:   ${next ? next.toISOString() : '—'}\n`);

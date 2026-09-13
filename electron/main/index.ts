@@ -8,6 +8,7 @@ import { registerFlowIpcHandlers } from './flowsIpc.js';
 import { registerSearchIpcHandlers } from './searchIpc.js';
 import { registerScheduleIpcHandlers } from './schedulesIpc.js';
 import { registerSettingsIpcHandlers } from './settingsIpc.js';
+import { registerAutoUpdateIpcHandlers, scheduleAutoUpdateChecks } from './autoUpdate.js';
 
 const dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -56,6 +57,8 @@ app.whenReady().then(async () => {
   registerSearchIpcHandlers();
   registerScheduleIpcHandlers();
   registerSettingsIpcHandlers();
+  registerAutoUpdateIpcHandlers();
+  scheduleAutoUpdateChecks();
 
   createWindow();
 

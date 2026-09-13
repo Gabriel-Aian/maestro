@@ -22,6 +22,7 @@ export function SearchesScreen() {
   const [loadError, setLoadError] = useState<{ reason: string; issues?: { path: string; message: string }[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [sampleSize, setSampleSize] = useState('');
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [jobs, setJobs] = useState<JobTracker[]>([]);
@@ -111,7 +112,8 @@ export function SearchesScreen() {
     setRunning(true);
     setRunError(null);
     setJobs([]);
-    const result = await window.maestro.runSearch(filePath, [...selected]);
+    const n = sampleSize.trim() ? Number(sampleSize) : undefined;
+    const result = await window.maestro.runSearch(filePath, [...selected], Number.isInteger(n) && n! > 0 ? n : undefined);
     setRunning(false);
     if (result.ok) {
       // consumeJobCompletion() é de uso único — chamado aqui uma vez por
@@ -226,6 +228,17 @@ export function SearchesScreen() {
                 <span className="text-muted">
                   {file.totalQueries} pesquisa(s) no total, {selected.size} tema(s) selecionado(s)
                 </span>
+                <label style={{ fontSize: 13 }}>
+                  Rodar apenas{' '}
+                  <input
+                    type="text"
+                    placeholder="todas"
+                    value={sampleSize}
+                    onChange={(e) => setSampleSize(e.target.value)}
+                    style={{ width: 50, textAlign: 'center' }}
+                  />{' '}
+                  pesquisa(s) sorteada(s)
+                </label>
                 <button className="btn btn-primary" disabled={running || selected.size === 0} onClick={run}>
                   {running ? 'Enfileirando…' : 'Rodar'}
                 </button>

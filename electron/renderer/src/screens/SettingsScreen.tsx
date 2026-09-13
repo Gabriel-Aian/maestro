@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { AppConfigView } from '../../../shared/ipc.js';
+import type { AppConfigView, UpdateStatus } from '../../../shared/ipc.js';
 
 interface ConfigFormState {
   defaultHeadless: boolean;
@@ -112,6 +112,88 @@ function Checkbox({ label, checked, onChange }: { label: string; checked: boolea
     <label style={{ fontSize: 13, display: 'block', marginBottom: 10 }}>
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} /> {label}
     </label>
+  );
+}
+
+function describeUpdateStatus(status: UpdateStatus | null): string {
+  if (!status) return 'Consultando…';
+  switch (status.state) {
+    case 'unsupported':
+      return status.reason;
+    case 'idle':
+      return 'Nenhuma checagem feita ainda nesta sessão.';
+    case 'checking':
+      return 'Checando por atualizações…';
+    case 'available':
+      return `Versão ${status.version} disponível — baixando…`;
+    case 'not-available':
+      return 'Você já está na versão mais recente.';
+    case 'downloading':
+      return `Baixando versão ${status.version}… ${status.percent}%`;
+    case 'downloaded':
+      return `Versão ${status.version} baixada — pronta para instalar.`;
+    case 'error':
+      return `Falha ao checar atualizações: ${status.message}`;
+  }
+}
+
+/**
+ * Auto-update via GitHub Releases público (RF pedido pelo usuário — ver
+ * `electron/main/autoUpdate.ts`). Só existe de verdade num app empacotado
+ * (`app.isPackaged`); em desenvolvimento o próprio backend devolve
+ * `state: 'unsupported'` com uma mensagem clara em vez de tentar checar.
+ * Baixa sozinho (não afeta nenhuma automação em andamento), mas só instala
+ * quando o usuário confirma aqui — reiniciar mataria fluxos/pesquisas em
+ * execução no mesmo processo.
+ */
+function UpdateCard() {
+  const [status, setStatus] = useState<UpdateStatus | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [installing, setInstalling] = useState(false);
+
+  useEffect(() => {
+    window.maestro.getUpdateStatus().then(setStatus);
+    return window.maestro.onUpdateEvent(setStatus);
+  }, []);
+
+  async function check(): Promise<void> {
+    setChecking(true);
+    try {
+      setStatus(await window.maestro.checkForUpdates());
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function install(): Promise<void> {
+    setInstalling(true);
+    await window.maestro.installUpdate();
+    // Se isto ainda estiver visível, o app não fechou (ex.: build de
+    // desenvolvimento) — não há um "senão" de sucesso porque o caminho
+    // normal é o processo inteiro reiniciar.
+    setInstalling(false);
+  }
+
+  const canCheck = status?.state !== 'unsupported' && status?.state !== 'checking' && status?.state !== 'downloading' && !checking;
+
+  return (
+    <div className="card" style={{ padding: 14 }}>
+      <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--text-muted)' }}>
+        Verifica a Release mais recente publicada no GitHub e baixa em segundo plano — nunca instala sozinho, porque reiniciar encerraria
+        qualquer fluxo ou pesquisa em execução nesta janela.
+      </p>
+      <div className="toolbar" style={{ marginBottom: 0 }}>
+        <span className="text-muted">{describeUpdateStatus(status)}</span>
+        <button className="btn" disabled={!canCheck} onClick={check}>
+          {checking ? 'Checando…' : 'Verificar agora'}
+        </button>
+        {status?.state === 'downloaded' && (
+          <button className="btn btn-primary" disabled={installing} onClick={install}>
+            {installing ? 'Reiniciando…' : 'Reiniciar e instalar'}
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -267,6 +349,11 @@ export function SettingsScreen() {
           </Field>
         </div>
       </div>
+
+      <h3 className="section-title" style={{ marginTop: 24 }}>
+        Atualizações
+      </h3>
+      <UpdateCard />
     </div>
   );
 }
