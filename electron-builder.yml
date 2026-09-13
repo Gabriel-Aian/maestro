@@ -40,7 +40,20 @@ nsis:
 # nunca publica como efeito colateral (`--publish=never`). Ver "Auto-update"
 # no CLAUDE.md para o restante (o que isso NÃO resolve sozinho, e o que falta
 # para o repositório/releases ficarem de fato públicos no GitHub).
+#
+# `releaseType: release` é obrigatório aqui — o default do electron-builder
+# é publicar como RASCUNHO (draft), que não aparece no feed que o
+# electron-updater consulta (releases.atom) nem em GET /releases/latest.
+# Achado ao vivo na primeira execução real do workflow: a Release saiu, mas
+# o app relatou "404" ao checar atualizações porque o draft é invisível para
+# esses dois caminhos. Pior: sem tag publicada ainda (drafts não criam a tag
+# de verdade), o electron-builder não consegue achar a release já criada ao
+# subir o segundo artefato (latest.yml) e cria OUTRO draft duplicado para a
+# mesma versão — visto ao vivo (duas releases "v0.3.1", ambas draft). Com
+# `releaseType: release` a publicação sai completa e visível já na primeira
+# tentativa, sem esse race.
 publish:
   provider: github
   owner: Gabriel-Aian
   repo: maestro
+  releaseType: release
