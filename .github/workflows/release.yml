@@ -61,20 +61,26 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Publicando versão $version"
 
-      # `releaseType: release` (electron-builder.yml) publica a Release direto,
-      # sem passar por rascunho — mas a API do GitHub rejeita criar uma Release
-      # já publicada para uma tag que ainda não existe ("Published releases
-      # must have a valid tag", 422). Visto ao vivo na primeira tentativa: sem
-      # tag pré-existente, os dois artefatos que o electron-builder sobe em
-      # paralelo (o .exe e o .exe.blockmap) corriam para criar a mesma Release
-      # ao mesmo tempo, e um dos dois perdia essa corrida e derrubava o job
-      # inteiro. Criar a tag aqui, antes do publish, faz o electron-builder
-      # sempre publicar contra uma tag que já existe — sem corrida para criar.
-      - name: Criar tag da versão
+      # electron-builder sobe o `.exe` e o `.exe.blockmap` em PARALELO. Se a
+      # Release ainda não existe, os dois tentam criá-la ao mesmo tempo e um
+      # perde a corrida — visto ao vivo em duas formas diferentes: primeiro
+      # "Published releases must have a valid tag" (422) quando nem a tag
+      # existia ainda, depois "tag_name already_exists" (422) mesmo já
+      # criando a tag antes (a Release em si ainda não existia — criar só a
+      # tag não bastava). Resultado real de uma dessas corridas: uma Release
+      # "v0.3.3" publicada com só o `.blockmap` anexado, sem o `.exe` nem o
+      # `latest.yml` — inútil para o auto-update. Correção definitiva: criar
+      # a Release inteira (com a tag) AQUI, antes do build, usando o `gh` já
+      # instalado no runner — assim os dois uploads acham a Release pronta e
+      # só anexam arquivo, sem disputa nenhuma para criar nada.
+      - name: Criar a Release antes do build (evita corrida de criação)
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git tag "v${{ steps.version.outputs.version }}"
-          git push origin "v${{ steps.version.outputs.version }}"
+          gh release create "v${{ steps.version.outputs.version }}" \
+            --title "${{ steps.version.outputs.version }}" \
+            --notes "Publicado automaticamente pelo CI a partir de ${{ github.sha }}."
 
       - name: Build e publicar instalador
         run: npm run package:win:publish
