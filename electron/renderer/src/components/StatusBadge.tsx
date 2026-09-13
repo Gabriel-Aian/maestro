@@ -10,6 +10,7 @@ const LABELS: Record<string, string> = {
   authenticated: 'autenticado',
   session_expired: 'sessão expirada',
   never_authenticated: 'nunca autenticado',
+  skipped: 'pulado',
 };
 
 /**
@@ -22,6 +23,7 @@ const KIND: Record<string, string> = {
   authenticated: 'done',
   session_expired: 'failed',
   never_authenticated: 'cancelled',
+  skipped: 'cancelled',
 };
 
 export function StatusBadge({ status }: { status: string }) {

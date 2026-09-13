@@ -267,6 +267,11 @@ export const runs = {
       );
   },
 
+  /** Uma execução por id, com o detalhe por passo (`steps_json`) incluído. */
+  get(id: string): Record<string, unknown> | undefined {
+    return getDb().prepare('SELECT * FROM runs WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+  },
+
   /** Histórico paginado — nunca carrega o conjunto completo (RNF-011). */
   list(filter: { status?: RunStatus; kind?: string; limit?: number; offset?: number } = {}): Array<Record<string, unknown>> {
     const clauses: string[] = [];

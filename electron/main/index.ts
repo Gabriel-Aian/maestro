@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { initMaestro, shutdownMaestro } from './maestro.js';
 import { registerIpcHandlers } from './ipc.js';
 import { registerProfileIpcHandlers } from './profilesIpc.js';
+import { registerFlowIpcHandlers } from './flowsIpc.js';
 
 const dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -48,6 +49,7 @@ app.whenReady().then(async () => {
   await initMaestro();
   registerIpcHandlers();
   registerProfileIpcHandlers();
+  registerFlowIpcHandlers();
 
   createWindow();
 

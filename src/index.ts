@@ -3,6 +3,7 @@ export { Maestro } from './orchestrator.js';
 export { JobQueue, type Job, type JobKind, type JobStatus, type JobHandler, type JobQueueEvents } from './queue/queue.js';
 export { RecordingSession, materializeTimingSteps, DEFAULT_TIMING_MIN_MS, DEFAULT_TIMING_MAX_MS } from './recorder/recorder.js';
 export { replayFlow, resolveVariables } from './engine/replay.js';
+export { describeCandidate } from './engine/selectors.js';
 export { runSearchBatch } from './search/runner.js';
 export { expandSearches, loadSearchFile, validateSearchFile } from './search/searchFile.js';
 export { saveFlow, loadFlow, listFlowVersions, restoreFlowVersion } from './store/flowStore.js';

@@ -2,13 +2,15 @@ import { useEffect, useState } from 'react';
 import { QueueScreen } from './screens/QueueScreen.js';
 import { HistoryScreen } from './screens/HistoryScreen.js';
 import { ProfilesScreen } from './screens/ProfilesScreen.js';
+import { FlowsScreen } from './screens/FlowsScreen.js';
 
-type Screen = 'queue' | 'history' | 'profiles';
+type Screen = 'queue' | 'history' | 'profiles' | 'flows';
 
 const NAV: Array<{ id: Screen; label: string }> = [
   { id: 'queue', label: 'Fila' },
   { id: 'history', label: 'Histórico' },
   { id: 'profiles', label: 'Perfis' },
+  { id: 'flows', label: 'Fluxos' },
 ];
 
 export function App() {
@@ -38,6 +40,7 @@ export function App() {
         {screen === 'queue' && <QueueScreen />}
         {screen === 'history' && <HistoryScreen />}
         {screen === 'profiles' && <ProfilesScreen />}
+        {screen === 'flows' && <FlowsScreen />}
       </main>
     </div>
   );

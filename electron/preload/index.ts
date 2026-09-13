@@ -5,6 +5,9 @@ import {
   type ActionResult,
   type AddProfileResult,
   type BrowserView,
+  type FlowDetailView,
+  type FlowListItem,
+  type FlowRunDetail,
   type HistoryFilter,
   type HistoryRunView,
   type LoginCheckResult,
@@ -12,6 +15,7 @@ import {
   type ProfilesEvent,
   type QueueEvent,
   type QueueJobView,
+  type RunFlowResult,
   type StatusView,
 } from '../shared/ipc.js';
 
@@ -51,6 +55,12 @@ const api = {
   startLogin: (profileId: string, url: string): Promise<ActionResult> => ipcRenderer.invoke('maestro:login:start', { profileId, url }),
   checkLogin: (profileId: string): Promise<LoginCheckResult> => ipcRenderer.invoke('maestro:login:check', profileId),
   completeLogin: (profileId: string): Promise<ActionResult> => ipcRenderer.invoke('maestro:login:complete', profileId),
+
+  listFlows: (): Promise<FlowListItem[]> => ipcRenderer.invoke('maestro:flows:list'),
+  getFlow: (id: string): Promise<FlowDetailView> => ipcRenderer.invoke('maestro:flows:get', id),
+  runFlow: (flowId: string, profileId: string, variables: Record<string, string>, headed: boolean): Promise<RunFlowResult> =>
+    ipcRenderer.invoke('maestro:flows:run', { flowId, profileId, variables, headed }),
+  getRun: (runId: string): Promise<FlowRunDetail | null> => ipcRenderer.invoke('maestro:runs:get', runId),
 };
 
 contextBridge.exposeInMainWorld('maestro', api);

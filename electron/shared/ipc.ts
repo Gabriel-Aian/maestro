@@ -105,3 +105,65 @@ export const LOGIN_DEFAULT_URL = 'https://www.google.com/';
 /** O widget de login é uma janela separada — este evento avisa a tela de Perfis quando ele termina lá. */
 export type ProfilesEvent = { type: 'login-completed'; profileId: string };
 export const PROFILES_EVENT_CHANNEL = 'maestro:profilesEvent';
+
+/* ─────────────────────────  FLUXOS  ───────────────────────── */
+
+export interface FlowListItem {
+  id: string;
+  name: string;
+  startUrl: string;
+  stepCount: number;
+  needsReview: boolean;
+  lastStatus: string | null;
+  updatedAt: string;
+}
+
+export interface FlowVariableView {
+  name: string;
+  default: string;
+  description: string;
+  sensitive: boolean;
+}
+
+export interface FlowStepView {
+  index: number;
+  type: string;
+  /** Resumo do seletor/alvo principal do passo — mesma lógica do `flow show` da CLI. */
+  summary: string;
+  note: string | null;
+}
+
+export interface FlowDetailView {
+  id: string;
+  name: string;
+  startUrl: string;
+  needsReview: boolean;
+  variables: FlowVariableView[];
+  steps: FlowStepView[];
+}
+
+export type RunFlowResult = { ok: true; jobId: string } | { ok: false; reason: string };
+
+export interface FlowStepResultView {
+  index: number;
+  type: string;
+  status: 'success' | 'failed' | 'skipped';
+  degraded: boolean;
+  attempts: number;
+  durationMs: number;
+  error: string | null;
+}
+
+/** Resultado completo de uma execução — buscado sob demanda quando o job termina (evita inflar QueueEvent). */
+export interface FlowRunDetail {
+  runId: string;
+  status: string;
+  startedAt: string;
+  finishedAt: string | null;
+  durationMs: number | null;
+  degraded: boolean;
+  error: string | null;
+  blockReason: string | null;
+  artifactsDir: string | null;
+  steps: FlowStepResultView[];
+}
