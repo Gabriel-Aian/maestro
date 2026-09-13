@@ -108,7 +108,15 @@ export const FlowStepSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('navigate'), ...stepBase, url: z.string().url() }),
   z.object({ type: z.literal('click'), ...withSelectors, button: z.enum(['left', 'middle', 'right']).default('left') }),
   z.object({ type: z.literal('doubleClick'), ...withSelectors }),
-  z.object({ type: z.literal('type'), ...withSelectors, value: z.string(), clearFirst: z.boolean().default(true), pressEnter: z.boolean().default(false) }),
+  z.object({
+    type: z.literal('type'),
+    ...withSelectors,
+    value: z.string(),
+    clearFirst: z.boolean().default(true),
+    pressEnter: z.boolean().default(false),
+    /** `true` quando o valor veio de um campo de senha e não foi gravado (RNF-001) — ver `note` para a instrução. */
+    redacted: z.boolean().default(false),
+  }),
   z.object({ type: z.literal('select'), ...withSelectors, values: z.array(z.string()).min(1) }),
   z.object({ type: z.literal('check'), ...withSelectors, checked: z.boolean() }),
   z.object({ type: z.literal('press'), ...stepBase, key: z.string().min(1) }),

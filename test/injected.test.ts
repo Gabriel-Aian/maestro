@@ -179,4 +179,15 @@ describe('injectedRecorder — geração de seletores', () => {
     expect(events[0]!.value).toBe('teste@exemplo.com');
     expect(events[0]!.selectors.some((s) => s.kind === 'placeholder')).toBe(true);
   });
+
+  it('nunca captura o valor de um campo type="password" (RNF-001) — vale para digitação e para colar, já que ambos disparam "input"', () => {
+    const { dom, events } = setup(`<input id="senha" type="password" />`);
+    const input = dom.window.document.querySelector('input') as HTMLInputElement;
+    input.value = 'hunter2';
+    input.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+
+    expect(events[0]!.kind).toBe('input');
+    expect(events[0]!.value).toBe('');
+    expect(events[0]!.redacted).toBe(true);
+  });
 });

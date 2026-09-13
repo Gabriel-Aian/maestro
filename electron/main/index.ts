@@ -5,6 +5,7 @@ import { initMaestro, shutdownMaestro } from './maestro.js';
 import { registerIpcHandlers } from './ipc.js';
 import { registerProfileIpcHandlers } from './profilesIpc.js';
 import { registerFlowIpcHandlers } from './flowsIpc.js';
+import { closeActiveRecording, registerRecordIpcHandlers } from './recordIpc.js';
 import { registerSearchIpcHandlers } from './searchIpc.js';
 import { registerScheduleIpcHandlers } from './schedulesIpc.js';
 import { registerSettingsIpcHandlers } from './settingsIpc.js';
@@ -54,6 +55,7 @@ app.whenReady().then(async () => {
   registerIpcHandlers();
   registerProfileIpcHandlers();
   registerFlowIpcHandlers();
+  registerRecordIpcHandlers();
   registerSearchIpcHandlers();
   registerScheduleIpcHandlers();
   registerSettingsIpcHandlers();
@@ -75,7 +77,9 @@ app.on('window-all-closed', () => {
 // sair — sem isso, fechar a janela abandonaria contextos de perfil abertos.
 app.on('before-quit', (event) => {
   event.preventDefault();
-  shutdownMaestro()
+  closeActiveRecording()
+    .catch((err: unknown) => console.error('Falha ao fechar gravação em andamento:', err))
+    .then(() => shutdownMaestro())
     .catch((err: unknown) => console.error('Falha ao desligar o núcleo:', err))
     .finally(() => app.exit());
 });

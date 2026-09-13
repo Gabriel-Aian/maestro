@@ -170,6 +170,41 @@ export interface FlowRunDetail {
   steps: FlowStepResultView[];
 }
 
+/**
+ * Gravação de fluxo (RF-021 a RF-030) pela GUI — mesma capacidade que já
+ * existia só na CLI (`maestro record`). Só uma gravação ativa por vez no
+ * processo principal, análogo a RN-001 (o próprio `launchProfile` já rejeita
+ * abrir o mesmo perfil duas vezes, então isso é reforçado pelo núcleo, não
+ * apenas pela GUI).
+ */
+export interface RecordFlowStartInput {
+  name: string;
+  startUrl: string;
+  profileId: string;
+  /** Espelha `--convert-timings` da CLI — converte intervalos observados em passos `waitForTimeout` reais. */
+  convertTimings: boolean;
+}
+
+export type RecordFlowStartResult = { ok: true } | { ok: false; reason: string };
+
+export interface RecordFlowStatusView {
+  recording: boolean;
+  name: string | null;
+  startUrl: string | null;
+  profileName: string | null;
+  startedAt: string | null;
+  /** Total de eventos brutos capturados até agora — só para dar feedback de "está funcionando", não é a contagem final de passos. */
+  eventCount: number;
+}
+
+export const RECORD_EVENT_CHANNEL = 'maestro:recordEvent';
+
+export type RecordFlowStopResult =
+  | { ok: true; flowId: string; flowName: string; stepCount: number; needsReview: boolean; redactedCount: number }
+  | { ok: false; reason: string };
+
+export type RecordFlowCancelResult = { ok: true } | { ok: false; reason: string };
+
 /* ─────────────────────────  PESQUISAS  ───────────────────────── */
 
 export interface SearchThemeView {

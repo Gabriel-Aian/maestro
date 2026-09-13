@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
   PROFILES_EVENT_CHANNEL,
   QUEUE_EVENT_CHANNEL,
+  RECORD_EVENT_CHANNEL,
   UPDATE_EVENT_CHANNEL,
   type ActionResult,
   type AddProfileResult,
@@ -21,6 +22,11 @@ import {
   type ProfilesEvent,
   type QueueEvent,
   type QueueJobView,
+  type RecordFlowCancelResult,
+  type RecordFlowStartInput,
+  type RecordFlowStartResult,
+  type RecordFlowStatusView,
+  type RecordFlowStopResult,
   type RunFlowResult,
   type RunScheduleResult,
   type RunSearchOptions,
@@ -76,6 +82,12 @@ const api = {
   runFlow: (flowId: string, profileId: string, variables: Record<string, string>, headed: boolean): Promise<RunFlowResult> =>
     ipcRenderer.invoke('maestro:flows:run', { flowId, profileId, variables, headed }),
   getRun: (runId: string): Promise<FlowRunDetail | null> => ipcRenderer.invoke('maestro:runs:get', runId),
+
+  getRecordStatus: (): Promise<RecordFlowStatusView> => ipcRenderer.invoke('maestro:record:status'),
+  startRecording: (input: RecordFlowStartInput): Promise<RecordFlowStartResult> => ipcRenderer.invoke('maestro:record:start', input),
+  stopRecording: (): Promise<RecordFlowStopResult> => ipcRenderer.invoke('maestro:record:stop'),
+  cancelRecording: (): Promise<RecordFlowCancelResult> => ipcRenderer.invoke('maestro:record:cancel'),
+  onRecordEvent: (callback: (status: RecordFlowStatusView) => void): (() => void) => subscribe(RECORD_EVENT_CHANNEL, callback),
 
   getLastSearchFile: (): Promise<LoadSearchFileResult | null> => ipcRenderer.invoke('maestro:search:getLast'),
   pickSearchFile: (): Promise<LoadSearchFileResult | null> => ipcRenderer.invoke('maestro:search:pickFile'),

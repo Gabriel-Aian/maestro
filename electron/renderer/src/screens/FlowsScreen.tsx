@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { FlowDetailView, FlowListItem, FlowRunDetail, ProfileView } from '../../../shared/ipc.js';
+import type { FlowDetailView, FlowListItem, FlowRunDetail, ProfileView, RecordFlowStatusView } from '../../../shared/ipc.js';
 import { StatusBadge } from '../components/StatusBadge.js';
 import { consumeJobCompletion, useJobEvents, type JobCompletion } from '../jobEvents.js';
 
@@ -31,12 +31,14 @@ export function FlowsScreen() {
       <div className="page-header">
         <div>
           <h2>Fluxos</h2>
-          <p>Gravados via CLI (`maestro record`). Rodar aqui dispara direto na fila e mostra o resultado ao final, sem confirmação passo a passo.</p>
+          <p>Grave um fluxo novo abaixo ou pela CLI (`maestro record`). Rodar aqui dispara direto na fila e mostra o resultado ao final, sem confirmação passo a passo.</p>
         </div>
         <button className="btn" onClick={refresh}>
           Atualizar
         </button>
       </div>
+
+      <RecordFlowCard profiles={profiles} onRecorded={refresh} />
 
       {error && <div className="error-banner">{error}</div>}
 
@@ -46,7 +48,7 @@ export function FlowsScreen() {
         </div>
       ) : flows.length === 0 ? (
         <div className="card">
-          <div className="empty-state">Nenhum fluxo gravado ainda. Use "maestro record" na linha de comando.</div>
+          <div className="empty-state">Nenhum fluxo gravado ainda. Use o formulário acima ou "maestro record" na linha de comando.</div>
         </div>
       ) : (
         <div className="card">
@@ -73,6 +75,134 @@ export function FlowsScreen() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Gravação de fluxo pela GUI (RF-021 a RF-030) — mesma capacidade que já
+ * existia só na CLI (`maestro record`). O estado de "gravando" vive no
+ * processo principal (`electron/main/recordIpc.ts`), não aqui: por isso
+ * busca o status ao montar (cobre reabrir a tela com uma gravação já em
+ * andamento) e reage a `onRecordEvent` em vez de fazer polling, mesmo padrão
+ * de fila/histórico.
+ */
+function RecordFlowCard({ profiles, onRecorded }: { profiles: ProfileView[]; onRecorded: () => void }) {
+  const [status, setStatus] = useState<RecordFlowStatusView | null>(null);
+  const [name, setName] = useState('');
+  const [startUrl, setStartUrl] = useState('');
+  const [profileId, setProfileId] = useState('');
+  const [convertTimings, setConvertTimings] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [result, setResult] = useState<{ flowName: string; stepCount: number; needsReview: boolean; redactedCount: number } | null>(null);
+
+  useEffect(() => {
+    window.maestro.getRecordStatus().then(setStatus);
+    return window.maestro.onRecordEvent(setStatus);
+  }, []);
+
+  useEffect(() => {
+    if (!profileId && profiles.length > 0) setProfileId(profiles[0]!.id);
+  }, [profiles, profileId]);
+
+  async function start(): Promise<void> {
+    setFormError(null);
+    if (!name.trim()) return setFormError('Dê um nome ao fluxo.');
+    if (!startUrl.trim()) return setFormError('Informe a URL inicial.');
+    if (!profileId) return setFormError('Cadastre um perfil antes de gravar.');
+
+    setBusy(true);
+    setResult(null);
+    const r = await window.maestro.startRecording({ name: name.trim(), startUrl: startUrl.trim(), profileId, convertTimings });
+    setBusy(false);
+    if (!r.ok) {
+      setFormError(r.reason);
+      return;
+    }
+    window.maestro.getRecordStatus().then(setStatus);
+  }
+
+  async function stop(): Promise<void> {
+    setBusy(true);
+    const r = await window.maestro.stopRecording();
+    setBusy(false);
+    if (!r.ok) {
+      setFormError(r.reason);
+      return;
+    }
+    setName('');
+    setStartUrl('');
+    setResult({ flowName: r.flowName, stepCount: r.stepCount, needsReview: r.needsReview, redactedCount: r.redactedCount });
+    onRecorded();
+  }
+
+  async function cancel(): Promise<void> {
+    setBusy(true);
+    await window.maestro.cancelRecording();
+    setBusy(false);
+  }
+
+  if (status?.recording) {
+    return (
+      <div className="card" style={{ padding: '14px 18px', marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span className="badge badge-running">gravando</span>
+          <strong>{status.name}</strong>
+          <span className="text-muted mono">{status.startUrl}</span>
+          <span className="text-muted">perfil: {status.profileName}</span>
+          <span className="text-muted">{status.eventCount} evento(s) capturado(s)</span>
+        </div>
+        <p className="text-muted" style={{ margin: '8px 0 12px', fontSize: 13 }}>
+          Navegue normalmente na janela do navegador que abriu. Cliques, digitação e scroll são capturados. Alt+Clique em um elemento insere uma
+          asserção de texto. Campos de senha nunca têm o valor gravado (RNF-001).
+        </p>
+        <div className="toolbar">
+          <button className="btn btn-primary" disabled={busy} onClick={stop}>
+            {busy ? 'Salvando…' : 'Parar e salvar'}
+          </button>
+          <button className="btn btn-ghost" disabled={busy} onClick={cancel}>
+            Cancelar sem salvar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card" style={{ padding: '14px 18px', marginBottom: 16 }}>
+      <div className="section-title">Gravar novo fluxo</div>
+      <div className="toolbar" style={{ flexWrap: 'wrap' }}>
+        <input placeholder="Nome do fluxo" value={name} onChange={(e) => setName(e.target.value)} style={{ minWidth: 180 }} />
+        <input placeholder="URL inicial (https://…)" value={startUrl} onChange={(e) => setStartUrl(e.target.value)} style={{ minWidth: 260 }} />
+        <select value={profileId} onChange={(e) => setProfileId(e.target.value)}>
+          {profiles.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        <label style={{ fontSize: 13 }}>
+          <input type="checkbox" checked={convertTimings} onChange={(e) => setConvertTimings(e.target.checked)} /> converter intervalos
+          observados em esperas
+        </label>
+        <button className="btn btn-primary" disabled={busy || profiles.length === 0} onClick={start}>
+          {busy ? 'Abrindo…' : 'Gravar'}
+        </button>
+      </div>
+      {profiles.length === 0 && <p className="text-muted" style={{ fontSize: 13 }}>Cadastre um perfil na tela de Perfis antes de gravar.</p>}
+      {formError && <div className="error-banner">{formError}</div>}
+      {result && (
+        <div className="card" style={{ marginTop: 10, padding: '10px 14px', background: '#fafaf9' }}>
+          Fluxo "{result.flowName}" salvo com {result.stepCount} passo(s).
+          {result.redactedCount > 0 && (
+            <div style={{ marginTop: 6, color: '#92400e' }}>
+              ⚠ {result.redactedCount} campo(s) de senha foram detectados e <strong>não</strong> tiveram o valor gravado (RNF-001). Abra o fluxo
+              em "Ver e rodar" e substitua o passo pelo valor via uma variável sensível antes de rodar.
+            </div>
+          )}
         </div>
       )}
     </div>

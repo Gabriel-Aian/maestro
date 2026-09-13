@@ -15,7 +15,7 @@ O `README.md` documenta o uso. O levantamento de requisitos completo (RF-001 a R
 
 ## Estado atual
 
-Fases 1 a 4, 6 e 7 do plano estão implementadas. 107 testes passando, typecheck limpo.
+Fases 1 a 4, 6 e 7 do plano estão implementadas. 110 testes passando, typecheck limpo.
 
 | Pronto | Não implementado |
 |---|---|
@@ -31,6 +31,7 @@ Fases 1 a 4, 6 e 7 do plano estão implementadas. 107 testes passando, typecheck
 | Agendamento (`node-cron` + Agendador de Tarefas do Windows) | |
 | CLI cobrindo todas as operações | |
 | Casca Electron — fundação + todas as telas (fila, histórico, perfis/navegadores, fluxos, pesquisas, agendamentos, configurações) | |
+| Gravação de fluxo pela GUI (`electron/main/recordIpc.ts`), não só pela CLI | |
 | Empacotamento Windows (electron-builder, `npm run package:win`) | Ícone/branding reais (usa o ícone padrão do Electron) |
 | Agendamento com "modo simples" (periodicidade + horário) além do cron cru | |
 | Sorteio de N pesquisas sem repetir por execução (`sampleSize`) | |
@@ -104,6 +105,7 @@ electron/                 # casca Electron — NÃO faz parte do pacote "maestro
 │   ├── profilesIpc.ts     # perfis/navegadores/login: mesmo padrão, chamando openProfilePlain (sem automação)
 │   ├── loginWidget.ts     # janela flutuante separada que substitui o "pressione Enter" da CLI no login manual
 │   ├── flowsIpc.ts        # fluxos: listar/mostrar passos/rodar via maestro.enqueueFlow — resultado buscado por runId, sem widget
+│   ├── recordIpc.ts       # gravação de fluxo: start/stop/cancel/status, uma sessão ativa por vez, broadcast de progresso (RECORD_EVENT_CHANNEL)
 │   ├── searchIpc.ts       # pesquisas: só aponta para arquivo já existente (getLast/pickFile/reload/openFolder) + roda via maestro.enqueueSearches
 │   ├── schedulesIpc.ts    # agendamentos: CRUD + rodar agora + status/instalar/remover a tarefa do Windows (schtasks)
 │   ├── settingsIpc.ts     # configurações: get/getDefaults/update — update passa por Maestro.updateConfig(), nunca saveConfig() direto
@@ -132,7 +134,11 @@ electron-builder.yml        # instalador Windows — asar:false é deliberado, v
 
 **A aba ativa é estado mutável da execução** (`ReplaySession` em `replay.ts`). Um clique pode abrir outra aba e todos os passos seguintes devem rodar nela. Nunca volte a capturar `pages()[0]` em variável fixa — foi exatamente esse bug que fazia o fluxo se perder após redirecionamento.
 
-**Nenhuma senha é armazenada, em nenhuma hipótese (RNF-001).** Autenticação é sempre manual, e a sessão persiste no diretório de perfil.
+**Nenhuma senha é armazenada, em nenhuma hipótese (RNF-001).** Autenticação é sempre manual, e a sessão persiste no diretório de perfil. **Isso incluía um bug de verdade no gravador, achado respondendo a uma pergunta direta do usuário** ("o sistema de captura de flows já captura o que eu digito também? tecla por tecla incluindo ctrl c+ctrl v?"): `injected.ts`'s listener de `input` lia `el.value` de QUALQUER campo de texto, sem checar o `type` do elemento — um `<input type="password">` tinha o valor digitado (e também colado: colar dispara `input` igual digitação, não é um evento à parte) gravado em texto puro no passo `type` do fluxo, e dali para o JSON em disco (`saveFlow()` não criptografa nada). Corrigido em `injected.ts`: quando `el instanceof HTMLInputElement && el.type === 'password'`, o evento sai com `value: ''` e `redacted: true`; `compileEvents()` (`recorder.ts`) propaga isso para o passo `type` (`redacted: true`, mais uma `note` explicando o motivo) em vez do valor real; `RecordingSession.stop()` calcula `needsReview` a partir disso (antes sempre `false` ao gravar), reaproveitando o mesmo alerta "⚠ requer revisão" de RN-006 em vez de inventar um mecanismo novo. **Não cobre tudo**: um valor sensível digitado/colado num campo `type="text"` comum (site mal feito, ou o próprio usuário colando algo sensível fora de um campo de senha) não tem como ser detectado por essa checagem — a orientação de sempre continua valendo: revisar o fluxo gravado e, para qualquer literal sensível, criar uma variável com `sensitive: true` (a interpolação `{{nome}}` já existe em `replay.ts`, `variable.sensitive` já aciona `registerSecret()` para redigir logs). Coberto por `test/injected.test.ts` (o script injetado nunca emite o valor) e `test/compile.test.ts` (a compilação nunca deixa o valor vazar para o passo, e o `note` de intervalo observado continua funcionando para campos normais — a implementação ingênua seria incluir `note: undefined` sempre que não há senha, o que apagaria esse `note` calculado por padrão em `push()`).
+
+**Ctrl+C (copiar) nunca é capturado — não existe listener de evento de clipboard/copy em `injected.ts`.** Só os eventos DOM que o gravador escuta viram passo (click, dblclick, input, change, keydown restrito a teclas estruturais, submit, scroll); copiar texto para a área de transferência não dispara nenhum deles. Ctrl+V (colar) É capturado, mas indiretamente: colar dispara o mesmo evento `input` que digitar, então o valor colado vira o valor final do passo `type` igual a se tivesse sido digitado — é exatamente por isso que a checagem de senha acima olha o `type` do elemento, não o "como" o valor chegou lá.
+
+**Gravar um fluxo pela GUI (`electron/main/recordIpc.ts`, seção "Gravar novo fluxo" em `FlowsScreen.tsx`) é a mesma capacidade de `maestro record`, só que assíncrona em vez de bloquear num prompt de terminal.** Só uma gravação ativa por vez no processo principal (estado module-level em `recordIpc.ts`; `launchProfile` já impede abrir o mesmo perfil duas vezes por conta própria — RN-001 — isso aqui é só para não perder silenciosamente uma sessão em andamento se "Gravar" for clicado de novo). O fluxo é: `maestro:record:start` abre o navegador visível (`headless: false`, igual à CLI — gravar sem interação real não faz sentido) e injeta o gravador; cada evento bruto capturado chama `onEvent` (novo campo opcional em `RecordingOptions`), que a GUI usa para fazer `broadcast` de status por `RECORD_EVENT_CHANNEL` (mesmo padrão de `QUEUE_EVENT_CHANNEL` — reage a evento, não faz polling); `maestro:record:stop` compila, opcionalmente aplica `materializeTimingSteps` (checkbox "converter intervalos observados em esperas", espelhando `--convert-timings` da CLI) e salva, devolvendo `stepCount`/`needsReview`/`redactedCount` para a tela mostrar um aviso explícito quando algum campo de senha foi redigido; `maestro:record:cancel` fecha o navegador sem compilar nem salvar nada. `closeActiveRecording()` é chamado em `before-quit` (`electron/main/index.ts`) antes de `shutdownMaestro()` — sem isso, fechar a janela com uma gravação em andamento abandonaria o processo do navegador e o `SingletonLock` do perfil, travando-o até alguém apagar o arquivo manualmente (mesmo cuidado que a fila já tinha, só que para um contexto que a `BrowserPool` não gerencia).
 
 **Não implemente contorno de CAPTCHA nem mascaramento de automação (RNF-006).** Decisão de projeto, não limitação técnica. Ao detectar desafio, a execução para com status `blocked` e o perfil é congelado. Provedores de identidade (Google, Microsoft) recusam login em navegador automatizado por design — a resposta é `profile login`, que abre o navegador **sem** automação para o usuário autenticar como humano.
 
@@ -217,7 +223,7 @@ electron-builder.yml        # instalador Windows — asar:false é deliberado, v
 npm install
 npm run build        # tsc
 npm run typecheck    # tsc --noEmit
-npm test             # vitest, 107 testes
+npm test             # vitest, 110 testes
 npm run dev -- <cmd> # roda a CLI direto do TS
 
 node dist/cli.js doctor
@@ -252,8 +258,8 @@ O `Maestro-Setup-<versão>.exe` gerado por `npm run package:win` é autocontido 
 
 ## Testes
 
-- `test/injected.test.ts` — geração de seletores sob jsdom. Contém um truque necessário: o gravador exige `isTrusted`, e jsdom zera essa flag no dispatch. A solução é marcar a implementação interna via `Symbol(impl)` em listener no Window, que roda antes dos listeners do document. Está comentado no arquivo.
-- `test/compile.test.ts` — coalescência e troca de abas.
+- `test/injected.test.ts` — geração de seletores sob jsdom. Contém um truque necessário: o gravador exige `isTrusted`, e jsdom zera essa flag no dispatch. A solução é marcar a implementação interna via `Symbol(impl)` em listener no Window, que roda antes dos listeners do document. Está comentado no arquivo. Também cobre que um `<input type="password">` nunca emite o valor digitado (RNF-001) — `value` sai vazio e `redacted: true`.
+- `test/compile.test.ts` — coalescência e troca de abas; que o passo `type` compilado a partir de um campo de senha nunca carrega o valor (mesmo coalescendo várias teclas/um paste); e que o `note` de "intervalo observado" continua funcionando para campos normais (não regride por causa do tratamento de senha).
 - `test/blockDetection.test.ts` — falsos positivos de login, CAPTCHA.
 - `test/queue.test.ts` — invariantes de escalonamento com handler falso, incluindo o delay entre jobs do mesmo perfil.
 - `test/searchFile.test.ts` — validação, herança, expansão; `sampleSize` (sorteio sem repetição, respeita o total quando N ≥ tamanho do pool, combina com o filtro por tema, comportamento de sempre quando omitido); e overrides de `engine`/`delayRangeMs` (sobrescrevem todas as pesquisas já expandidas, `engine` desconhecido lança antes de devolver qualquer resultado, ausência de override preserva o que o arquivo declarou).

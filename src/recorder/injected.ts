@@ -26,6 +26,8 @@ export interface RawEvent {
   altKey?: boolean;
   /** Texto visível do elemento, usado como valor esperado da asserção. */
   text?: string;
+  /** `true` quando `value` foi omitido de propósito por vir de um campo de senha (RNF-001). */
+  redacted?: boolean;
   url: string;
   t: number;
 }
@@ -351,8 +353,13 @@ export function injectedRecorder(): void {
       if (!el || !e.isTrusted) return;
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
         const event = baseEvent('input', el);
-        event.value = el.value;
+        // Campo de senha nunca tem o valor capturado (RNF-001) — nem digitado
+        // nem colado, já que colar também dispara 'input'. `type` só é
+        // confiável em HTMLInputElement; textarea não tem variante senha.
+        const isPassword = el instanceof HTMLInputElement && el.type === 'password';
+        event.value = isPassword ? '' : el.value;
         event.inputType = el instanceof HTMLInputElement ? el.type : 'textarea';
+        if (isPassword) event.redacted = true;
         emit(event);
       }
     },
