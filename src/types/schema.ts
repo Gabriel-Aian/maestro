@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { validate as validateCronExpression } from 'node-cron';
 
 /* ─────────────────────────  SELETORES  ───────────────────────── */
 
@@ -336,3 +337,50 @@ export const AppConfigSchema = z.object({
   detectLoginWall: z.boolean().default(true),
 });
 export type AppConfig = z.infer<typeof AppConfigSchema>;
+
+/* ─────────────────────────  AGENDAMENTO  ───────────────────────── */
+
+/**
+ * O que um agendamento dispara. Reaproveita exatamente os mesmos caminhos de
+ * `Maestro.enqueueFlow`/`enqueueSearches` — um agendamento não é um modo de
+ * execução paralelo, é só mais um produtor de jobs para a fila existente.
+ *
+ * Note a ausência de `headless`: execução agendada é sempre headless (RN-007).
+ * A sessão do Windows pode estar bloqueada quando o disparo acontece, e
+ * automação visível não funciona nesse cenário — não há opção "headed" aqui
+ * porque não existe forma segura de honrá-la sem supervisão humana.
+ */
+export const ScheduleTargetSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('flow'),
+    flowId: z.string().min(1),
+    profile: z.string().min(1),
+    variables: z.record(z.string(), z.string()).default({}),
+  }),
+  z.object({
+    kind: z.literal('search'),
+    searchFile: z.string().min(1),
+    themeIds: z.array(z.string()).optional(),
+  }),
+]);
+export type ScheduleTarget = z.infer<typeof ScheduleTargetSchema>;
+
+export const ScheduleSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  /** Padrão cron de 5 ou 6 campos (node-cron aceita segundos opcionais). */
+  cron: z.string().min(1).refine((expr) => validateCronExpression(expr), { message: 'expressão cron inválida' }),
+  enabled: z.boolean().default(true),
+  target: ScheduleTargetSchema,
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  lastRunAt: z.string().nullable().default(null),
+  lastStatus: z.string().nullable().default(null),
+  /**
+   * Minuto (ISO truncado) do último disparo — idempotência do tick: dois
+   * invocações de `schedule tick` que caiam no mesmo minuto não disparam o
+   * mesmo agendamento duas vezes.
+   */
+  lastFiredKey: z.string().nullable().default(null),
+});
+export type Schedule = z.infer<typeof ScheduleSchema>;

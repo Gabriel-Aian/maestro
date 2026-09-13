@@ -8,20 +8,23 @@ import { replayFlow, resolveVariables } from './engine/replay.js';
 import { runSearchBatch } from './search/runner.js';
 import { loadFlow } from './store/flowStore.js';
 import { expandSearches, loadSearchFile } from './search/searchFile.js';
-import { flowsIndex, profiles, runs } from './db/index.js';
+import { flowsIndex, profiles, runs, schedules } from './db/index.js';
 import { loadConfig } from './config/config.js';
 import { logger } from './logger.js';
-import type { AppConfig, Profile, ResolvedSearch, RunResult } from './types/schema.js';
+import type { AppConfig, Profile, ResolvedSearch, RunResult, Schedule } from './types/schema.js';
 
 export interface FlowJobPayload extends Record<string, unknown> {
   flowId: string;
   variables?: Record<string, string>;
   dryRun?: boolean;
+  /** Presente quando o job veio de um agendamento — alimenta o `lastStatus` dele. */
+  scheduleId?: string;
 }
 
 export interface SearchJobPayload extends Record<string, unknown> {
   searches: ResolvedSearch[];
   label: string;
+  scheduleId?: string;
 }
 
 /**
@@ -75,7 +78,11 @@ export class Maestro {
 
   /* ─────────────────────────  ENFILEIRAMENTO  ───────────────────────── */
 
-  enqueueFlow(flowId: string, profileName: string, opts: { headless?: boolean; variables?: Record<string, string>; priority?: number } = {}): Job {
+  enqueueFlow(
+    flowId: string,
+    profileName: string,
+    opts: { headless?: boolean; variables?: Record<string, string>; priority?: number; scheduleId?: string } = {},
+  ): Job {
     const profile = this.requireProfile(profileName);
     const flow = loadFlow(flowId);
 
@@ -84,7 +91,7 @@ export class Maestro {
 
     return this.queue.enqueue({
       kind: 'flow',
-      payload: { flowId, variables: opts.variables ?? {} } satisfies FlowJobPayload,
+      payload: { flowId, variables: opts.variables ?? {}, scheduleId: opts.scheduleId } satisfies FlowJobPayload,
       profileId: profile.id,
       headless: opts.headless ?? this.config.defaultHeadless,
       priority: opts.priority ?? 0,
@@ -96,7 +103,10 @@ export class Maestro {
    * a fila naturalmente serializar por conta e paralelizar entre contas
    * (RF-050) — exatamente o comportamento "primeiro conta 1, depois conta 2".
    */
-  enqueueSearches(searchFilePath: string, opts: { themeIds?: string[]; priority?: number } = {}): Job[] {
+  enqueueSearches(
+    searchFilePath: string,
+    opts: { themeIds?: string[]; priority?: number; forceHeadless?: boolean; scheduleId?: string } = {},
+  ): Job[] {
     const file = loadSearchFile(searchFilePath);
     const searches = expandSearches(file, { themeIds: opts.themeIds });
 
@@ -117,9 +127,9 @@ export class Maestro {
       jobs.push(
         this.queue.enqueue({
           kind: 'search',
-          payload: { searches: group, label: `${group.length} pesquisas` } satisfies SearchJobPayload,
+          payload: { searches: group, label: `${group.length} pesquisas`, scheduleId: opts.scheduleId } satisfies SearchJobPayload,
           profileId: profile.id,
-          headless: group[0]?.headless ?? this.config.defaultHeadless,
+          headless: opts.forceHeadless ?? group[0]?.headless ?? this.config.defaultHeadless,
           priority: opts.priority ?? 0,
         }),
       );
@@ -127,6 +137,30 @@ export class Maestro {
 
     logger.info({ jobs: jobs.length, searches: searches.length }, 'Pesquisas enfileiradas');
     return jobs;
+  }
+
+  /**
+   * Dispara um agendamento: só traduz `Schedule` para uma chamada de
+   * `enqueueFlow`/`enqueueSearches` — nenhum caminho de execução novo. Sempre
+   * headless (RN-007): a sessão do Windows pode estar bloqueada quando o
+   * disparo acontece, e automação visível não funciona nesse cenário.
+   */
+  enqueueSchedule(schedule: Schedule): Job[] {
+    if (schedule.target.kind === 'flow') {
+      return [
+        this.enqueueFlow(schedule.target.flowId, schedule.target.profile, {
+          headless: true,
+          variables: schedule.target.variables,
+          scheduleId: schedule.id,
+        }),
+      ];
+    }
+
+    return this.enqueueSearches(schedule.target.searchFile, {
+      themeIds: schedule.target.themeIds,
+      forceHeadless: true,
+      scheduleId: schedule.id,
+    });
   }
 
   private requireProfile(nameOrId: string): Profile {
@@ -211,8 +245,8 @@ export class Maestro {
   }
 
   private recordOutcome(job: Job, profile: Profile, result: RunResult): void {
-    const targetName =
-      job.kind === 'flow' ? String((job.payload as FlowJobPayload).flowId) : String((job.payload as SearchJobPayload).label);
+    const payload = job.payload as FlowJobPayload | SearchJobPayload;
+    const targetName = job.kind === 'flow' ? String((job.payload as FlowJobPayload).flowId) : String((job.payload as SearchJobPayload).label);
 
     runs.save(result, {
       targetId: job.kind === 'flow' ? (job.payload as FlowJobPayload).flowId : undefined,
@@ -225,6 +259,13 @@ export class Maestro {
     if (result.status === 'blocked') {
       profiles.setStatus(profile.id, 'session_expired');
       logger.warn({ profile: profile.name, reason: result.blockReason }, 'Perfil congelado após bloqueio');
+    }
+
+    // Job veio de um agendamento: registra o resultado nele. Um agendamento de
+    // pesquisa pode gerar mais de um job (um por perfil); o último a terminar
+    // é quem fica valendo como "última execução" — aproximação aceitável.
+    if (payload.scheduleId) {
+      schedules.recordRun(payload.scheduleId, { at: result.finishedAt, status: result.status });
     }
   }
 

@@ -15,21 +15,23 @@ O `README.md` documenta o uso. O levantamento de requisitos completo (RF-001 a R
 
 ## Estado atual
 
-Fases 1 a 4 e 6 do plano estão implementadas. 50 testes passando, typecheck limpo.
+Fases 1 a 4, 6 e 7 do plano estão implementadas. 83 testes passando, typecheck limpo.
 
 | Pronto | Não implementado |
 |---|---|
 | Detecção de navegadores (Registro do Windows) | Interface Electron |
 | Perfis isolados por conta | Editor visual de fluxos |
-| Gravador com seletores em cascata | Agendador de Tarefas do Windows |
-| Compilação/limpeza da gravação | Notificações nativas |
-| Replay com fallback e retries | Visualizador comparativo de screenshots |
+| Gravador com seletores em cascata | Notificações nativas |
+| Compilação/limpeza da gravação | Visualizador comparativo de screenshots |
+| Replay com fallback e retries | |
 | Detecção de CAPTCHA e parede de login | |
 | Fila persistente com serialização por perfil | |
+| Delay configurável (passo, fluxo, entre jobs) | |
 | Motor de pesquisas com expansão de variáveis | |
+| Agendamento (`node-cron` + Agendador de Tarefas do Windows) | |
 | CLI cobrindo todas as operações | |
 
-**Nunca foi executado contra navegador real neste ambiente de desenvolvimento** — não havia Chromium disponível. A lógica pura está testada; o comportamento com Brave/Chrome/Edge foi validado manualmente pelo usuário no Windows dele.
+**Nunca foi executado contra navegador real neste ambiente de desenvolvimento** — não havia Chromium disponível. A lógica pura está testada; o comportamento com Brave/Chrome/Edge foi validado manualmente pelo usuário no Windows dele. **O mesmo vale para `schtasks.exe`**: `schedule install-task`/`uninstall-task`/`task-status` nunca rodaram contra um Agendador de Tarefas real (este ambiente é Linux) — a sintaxe foi escrita com cuidado, mas confirme com `schedule install-task --dry-run` antes de instalar de verdade, e depois com `schedule task-status`.
 
 ## Arquitetura
 
@@ -49,7 +51,10 @@ src/
 │   ├── artifacts.ts      # screenshots, trace, manifesto
 │   └── replay.ts         # motor de execução
 ├── search/               # engines declarativos, validação/expansão, runner
-├── queue/queue.ts        # fila em SQLite
+├── queue/queue.ts        # fila em SQLite, com delay entre jobs do mesmo perfil
+├── scheduler/
+│   ├── scheduler.ts      # isDue()/runDueSchedules() — avaliação pura, node-cron por baixo
+│   └── windowsTask.ts    # registro da tarefa única no Agendador do Windows (schtasks)
 ├── db/index.ts           # migrações + repositórios
 ├── store/flowStore.ts    # fluxos em arquivo, com versionamento
 ├── orchestrator.ts       # composição de tudo
@@ -72,6 +77,10 @@ src/
 
 **Não implemente contorno de CAPTCHA nem mascaramento de automação (RNF-006).** Decisão de projeto, não limitação técnica. Ao detectar desafio, a execução para com status `blocked` e o perfil é congelado. Provedores de identidade (Google, Microsoft) recusam login em navegador automatizado por design — a resposta é `profile login`, que abre o navegador **sem** automação para o usuário autenticar como humano.
 
+**Agendamento nunca roda headed (RN-007).** A sessão do Windows pode estar bloqueada quando o disparo acontece, e automação visível não funciona nesse cenário. `Maestro.enqueueSchedule()` força `headless: true` incondicionalmente — não adicione uma opção para desligar isso.
+
+**Uma única tarefa no Agendador do Windows, não uma por agendamento.** Ela só chama `maestro schedule tick`, que lê os agendamentos do banco a cada execução e usa `node-cron`'s `createTask(...).match(now)` (sem nunca iniciar o timer interno) para decidir o que disparar. Criar/editar/remover agendamentos nunca precisa tocar o Agendador de Tarefas de novo — só a instalação inicial. Não tente traduzir cada cron para um trigger nativo do `schtasks`; é exatamente o problema que esse design evita.
+
 ## Decisões técnicas e seus porquês
 
 **`node:sqlite` em vez de `better-sqlite3`.** O nativo exige recompilar para a ABI do Electron a cada atualização, que é a maior dor no empacotamento. A camada está isolada em `src/db/index.ts` — trocar é alterar só esse arquivo. O módulo ainda é experimental no Node 22; o aviso é filtrado no topo de `cli.ts`.
@@ -90,7 +99,7 @@ src/
 npm install
 npm run build        # tsc
 npm run typecheck    # tsc --noEmit
-npm test             # vitest, 50 testes
+npm test             # vitest, 83 testes
 npm run dev -- <cmd> # roda a CLI direto do TS
 
 node dist/cli.js doctor
@@ -100,6 +109,11 @@ node dist/cli.js record "Fluxo" --url https://site.com --profile conta-1
 node dist/cli.js flow show <id>
 node dist/cli.js flow run <id> --profile conta-1 --step
 node dist/cli.js search validate examples/searches.example.json
+
+node dist/cli.js schedule add "Diário 9h" --cron "30 9 * * *" --flow <id> --profile conta-1
+node dist/cli.js schedule run <id>              # dispara agora, ignorando o cron — teste antes de confiar
+node dist/cli.js schedule install-task --dry-run  # mostra o comando schtasks sem instalar nada
+node dist/cli.js schedule install-task            # Windows: registra a tarefa única que roda "schedule tick"
 ```
 
 No Windows com PowerShell, se `npm` for bloqueado por política de execução, use `npm.cmd`.
@@ -109,16 +123,18 @@ No Windows com PowerShell, se `npm` for bloqueado por política de execução, u
 - `test/injected.test.ts` — geração de seletores sob jsdom. Contém um truque necessário: o gravador exige `isTrusted`, e jsdom zera essa flag no dispatch. A solução é marcar a implementação interna via `Symbol(impl)` em listener no Window, que roda antes dos listeners do document. Está comentado no arquivo.
 - `test/compile.test.ts` — coalescência e troca de abas.
 - `test/blockDetection.test.ts` — falsos positivos de login, CAPTCHA.
-- `test/queue.test.ts` — invariantes de escalonamento com handler falso.
+- `test/queue.test.ts` — invariantes de escalonamento com handler falso, incluindo o delay entre jobs do mesmo perfil.
 - `test/searchFile.test.ts` — validação, herança, expansão.
+- `test/timing.test.ts` — precedência de delay (passo > fluxo > global) e conversão de intervalos gravados em passos reais.
+- `test/scheduler.test.ts` — `isDue`/idempotência do tick/isolamento de falha; construção do comando `schtasks` sem executá-lo.
 
 `vitest.config.ts` cria um `MAESTRO_HOME` descartável: os testes nunca tocam o `%APPDATA%` real.
 
 ## Próximos passos sugeridos, em ordem
 
 1. **Validar o gravador em sites reais.** É o maior risco aberto. Peça ao usuário o `flow show` de fluxos gravados em sites de verdade e calibre as heurísticas de `injected.ts` em cima dos casos concretos — especialmente `looksGenerated()`, que pode estar descartando identificadores válidos ou aceitando gerados.
-2. **Editor de fluxos (fase 5, RF-031 a RF-039).** Remover passos, reordenar, parametrizar valores em variáveis, inserir esperas e asserções. Hoje só dá para editar o JSON à mão.
-3. **Agendamento (fase 7, RF-057 a RF-063).** `node-cron` já está nas dependências mas não é usado. Falta também registrar tarefa no Agendador do Windows, para rodar com o app fechado. Atenção à RN-007: execução visível não funciona com a sessão do Windows bloqueada.
+2. **Validar o agendamento no Windows real.** Segundo maior risco aberto, mesma natureza do item 1: `schedule install-task`/`tick` nunca rodaram contra um Agendador de Tarefas de verdade. Peça ao usuário para instalar com `--dry-run` primeiro, depois de verdade, e conferir com `schedule task-status` e `schedule list` (próxima janela calculada) se bate com o Agendador de Tarefas nativo do Windows.
+3. **Editor de fluxos (fase 5, RF-031 a RF-039).** Remover passos, reordenar, parametrizar valores em variáveis, inserir esperas e asserções. Hoje só dá para editar o JSON à mão.
 4. **Casca Electron.** O núcleo já é invocável sem UI (RNF-020), então é consumir a API de `src/index.ts`. Comece pela tela de fila e histórico, que são as de maior uso.
 5. **Retenção e métricas na UI (RF-071 a RF-077).** A lógica existe (`Maestro.cleanupArtifacts()`, `runs.stats()`), falta superfície.
 
