@@ -15,15 +15,18 @@ import { createRequire } from 'node:module';
 import { Command } from 'commander';
 import { detectBrowsers, validateBrowserPath } from './browsers/detect.js';
 import { launchProfile, isProfileLocked, openProfilePlain } from './browsers/launcher.js';
-import { RecordingSession } from './recorder/recorder.js';
+import { RecordingSession, materializeTimingSteps, DEFAULT_TIMING_MIN_MS, DEFAULT_TIMING_MAX_MS } from './recorder/recorder.js';
 import { saveFlow, loadFlow, listFlowVersions, restoreFlowVersion } from './store/flowStore.js';
 import { loadSearchFile, validateSearchFile, expandSearches } from './search/searchFile.js';
 import { replayFlow } from './engine/replay.js';
 import { Maestro } from './orchestrator.js';
 import { loadConfig, saveConfig } from './config/config.js';
-import { profiles, flowsIndex, runs, getDb } from './db/index.js';
+import { profiles, flowsIndex, runs, schedules, getDb } from './db/index.js';
 import { paths, ensureDataDirs } from './config/paths.js';
-import { ProfileSchema } from './types/schema.js';
+import { ProfileSchema, ScheduleSchema, type ScheduleTarget } from './types/schema.js';
+import { runDueSchedules } from './scheduler/scheduler.js';
+import { installWindowsTask, uninstallWindowsTask, windowsTaskStatus, buildInstallArgs, TICK_TASK_NAME } from './scheduler/windowsTask.js';
+import { createTask } from 'node-cron';
 
 // Lê a versão do package.json em vez de duplicá-la aqui: versão escrita à mão
 // em dois lugares diverge na primeira vez que alguém esquece de atualizar uma.
@@ -230,7 +233,10 @@ program
   .description('Grava um fluxo de navegação (RF-021 a RF-030)')
   .requiredOption('-u, --url <url>', 'URL inicial')
   .requiredOption('-p, --profile <name>', 'perfil a usar')
-  .action(async (name: string, opts: { url: string; profile: string }) => {
+  .option('--convert-timings', 'converte os intervalos observados na gravação em passos waitForTimeout reais')
+  .option('--min-ms <n>', `limiar mínimo para converter um intervalo (padrão ${DEFAULT_TIMING_MIN_MS}ms)`)
+  .option('--max-ms <n>', `teto aplicado ao intervalo convertido (padrão ${DEFAULT_TIMING_MAX_MS}ms)`)
+  .action(async (name: string, opts: { url: string; profile: string; convertTimings?: boolean; minMs?: string; maxMs?: string }) => {
     const p = profiles.find(opts.profile);
     if (!p) fail(`Perfil "${opts.profile}" não encontrado.`);
 
@@ -255,7 +261,13 @@ program
 
     try {
       const flow = await session.stop();
-      const saved = saveFlow(flow);
+      const steps = opts.convertTimings
+        ? materializeTimingSteps(flow.steps, {
+            minMs: opts.minMs !== undefined ? Number(opts.minMs) : undefined,
+            maxMs: opts.maxMs !== undefined ? Number(opts.maxMs) : undefined,
+          })
+        : flow.steps;
+      const saved = saveFlow({ ...flow, steps });
       ok(`Fluxo "${saved.name}" salvo como ${saved.id} (${saved.steps.length} passos).`);
       info(`  Arquivo: ${paths.flowFile(saved.id)}`);
       info(`  Teste antes de agendar: maestro flow run ${saved.id} -p ${opts.profile} --headed`);
@@ -345,6 +357,31 @@ flow
     ok(`Fluxo ${id} restaurado para ${version} (${restored.steps.length} passos).`);
   });
 
+flow
+  .command('convert-timings <id>')
+  .description('Converte os intervalos já gravados em passos waitForTimeout reais')
+  .option('--min-ms <n>', `limiar mínimo para converter um intervalo (padrão ${DEFAULT_TIMING_MIN_MS}ms)`)
+  .option('--max-ms <n>', `teto aplicado ao intervalo convertido (padrão ${DEFAULT_TIMING_MAX_MS}ms)`)
+  .action((id: string, opts: { minMs?: string; maxMs?: string }) => {
+    const flow = loadFlow(id);
+    const steps = materializeTimingSteps(flow.steps, {
+      minMs: opts.minMs !== undefined ? Number(opts.minMs) : undefined,
+      maxMs: opts.maxMs !== undefined ? Number(opts.maxMs) : undefined,
+    });
+    const inserted = steps.length - flow.steps.length;
+    if (inserted === 0) {
+      return info(
+        'Nada para converter: nenhum passo tem intervalo bruto pendente acima do limiar. ' +
+          'Isso vale tanto para fluxos já convertidos quanto para fluxos gravados antes deste ' +
+          'recurso existir (regrave para capturar o valor preciso).',
+      );
+    }
+
+    const saved = saveFlow({ ...flow, steps });
+    ok(`${inserted} passo(s) waitForTimeout inserido(s) no fluxo "${saved.name}" (${saved.steps.length} passos no total).`);
+    info(`  Versão anterior preservada — veja "maestro flow versions ${id}".`);
+  });
+
 /* ─────────────────────────  PESQUISAS  ───────────────────────── */
 
 const search = program.command('search').description('Pesquisas em lote');
@@ -385,6 +422,231 @@ search
 
     await maestro.queue.waitForIdle();
     await maestro.shutdown();
+  });
+
+/* ─────────────────────────  AGENDAMENTO  ───────────────────────── */
+
+const schedule = program.command('schedule').description('Agendamento de fluxos e pesquisas (RF-057 a RF-063)');
+
+/**
+ * `getNextRun()` só calcula algo depois que a tarefa é iniciada ao menos uma
+ * vez — `createTask` sozinho devolve sempre null. Como a função de callback é
+ * no-op, iniciar e parar imediatamente é seguro mesmo se o instante atual
+ * bater com o cron (o pior caso é uma chamada vazia a mais).
+ */
+function nextRunOf(cron: string): Date | null {
+  const task = createTask(cron, () => undefined);
+  try {
+    task.start();
+    return task.getNextRun();
+  } finally {
+    void task.stop();
+    void task.destroy();
+  }
+}
+
+function describeSchedule(s: { id: string; name: string; cron: string; enabled: boolean; lastStatus: string | null }): string {
+  const next = nextRunOf(s.cron);
+  const status = s.enabled ? 'ativo' : 'desativado';
+  const nextStr = next ? next.toISOString().slice(0, 16).replace('T', ' ') : '—';
+  return `  ${s.id.padEnd(14)} ${s.name.padEnd(24)} ${s.cron.padEnd(14)} ${status.padEnd(11)} próxima: ${nextStr}  última: ${s.lastStatus ?? '—'}`;
+}
+
+schedule
+  .command('add <name>')
+  .description('Cria um agendamento (RF-057, RF-058)')
+  .requiredOption('--cron <expr>', 'expressão cron (5 ou 6 campos)')
+  .option('--flow <id>', 'agenda um fluxo (exclusivo com --search)')
+  .option('-p, --profile <name>', 'perfil a usar (obrigatório com --flow)')
+  .option('--var <pares...>', 'variáveis do fluxo no formato nome=valor')
+  .option('--search <file>', 'agenda um arquivo de pesquisas (exclusivo com --flow)')
+  .option('--themes <ids>', 'restringe a temas específicos, separados por vírgula (com --search)')
+  .action(
+    (
+      name: string,
+      opts: { cron: string; flow?: string; profile?: string; var?: string[]; search?: string; themes?: string },
+    ) => {
+      if (Boolean(opts.flow) === Boolean(opts.search)) {
+        fail('Informe exatamente um de --flow ou --search.');
+      }
+
+      let target: ScheduleTarget;
+      if (opts.flow) {
+        if (!opts.profile) fail('--profile é obrigatório com --flow.');
+        if (!profiles.find(opts.profile!)) fail(`Perfil "${opts.profile}" não encontrado.`);
+        loadFlow(opts.flow); // valida que o fluxo existe
+        target = { kind: 'flow', flowId: opts.flow, profile: opts.profile!, variables: parseVars(opts.var ?? []) };
+      } else {
+        if (!existsSync(opts.search!)) fail(`Arquivo não encontrado: ${opts.search}`);
+        loadSearchFile(opts.search!); // valida o arquivo
+        target = { kind: 'search', searchFile: opts.search!, themeIds: opts.themes?.split(',').map((t) => t.trim()) };
+      }
+
+      const now = new Date().toISOString();
+      let saved;
+      try {
+        saved = ScheduleSchema.parse({
+          id: `sched-${randomUUID().slice(0, 8)}`,
+          name,
+          cron: opts.cron,
+          enabled: true,
+          target,
+          createdAt: now,
+          updatedAt: now,
+        });
+      } catch (err) {
+        fail(err instanceof Error ? err.message : String(err));
+      }
+
+      schedules.insert(saved);
+      ok(`Agendamento "${saved.name}" criado como ${saved.id}.`);
+      const next = nextRunOf(saved.cron);
+      info(`  Próxima janela: ${next ? next.toISOString() : 'não foi possível calcular'}`);
+      info(`  Teste antes de confiar no agendamento: maestro schedule run ${saved.id}`);
+    },
+  );
+
+schedule
+  .command('list')
+  .description('Lista os agendamentos (RF-059)')
+  .action(() => {
+    const all = schedules.list();
+    if (all.length === 0) return info('Nenhum agendamento cadastrado.');
+    for (const s of all) info(describeSchedule(s));
+  });
+
+schedule
+  .command('show <id>')
+  .description('Exibe os detalhes de um agendamento')
+  .action((id: string) => {
+    const s = schedules.find(id);
+    if (!s) fail(`Agendamento "${id}" não encontrado.`);
+    info(`\n${s.name}  (${s.id})`);
+    info(`  Cron:      ${s.cron}`);
+    info(`  Estado:    ${s.enabled ? 'ativo' : 'desativado'}`);
+    info(`  Alvo:      ${s.target.kind === 'flow' ? `fluxo ${s.target.flowId} (perfil ${s.target.profile})` : `pesquisas ${s.target.searchFile}${s.target.themeIds ? ` [${s.target.themeIds.join(', ')}]` : ''}`}`);
+    info(`  Última:    ${s.lastRunAt ? `${s.lastRunAt} — ${s.lastStatus}` : 'nunca rodou'}`);
+    const next = nextRunOf(s.cron);
+    info(`  Próxima:   ${next ? next.toISOString() : '—'}\n`);
+  });
+
+schedule
+  .command('enable <id>')
+  .description('Reativa um agendamento desativado')
+  .action((id: string) => {
+    if (!schedules.find(id)) fail(`Agendamento "${id}" não encontrado.`);
+    schedules.setEnabled(id, true);
+    ok(`Agendamento ${id} ativado.`);
+  });
+
+schedule
+  .command('disable <id>')
+  .description('Desativa um agendamento sem apagá-lo')
+  .action((id: string) => {
+    if (!schedules.find(id)) fail(`Agendamento "${id}" não encontrado.`);
+    schedules.setEnabled(id, false);
+    ok(`Agendamento ${id} desativado.`);
+  });
+
+schedule
+  .command('rm <id>')
+  .description('Remove um agendamento')
+  .action((id: string) => {
+    if (!schedules.find(id)) fail(`Agendamento "${id}" não encontrado.`);
+    schedules.remove(id);
+    ok(`Agendamento ${id} removido.`);
+  });
+
+schedule
+  .command('run <id>')
+  .description('Dispara um agendamento agora, ignorando o cron (para testar antes de confiar nele)')
+  .action(async (id: string) => {
+    const s = schedules.find(id);
+    if (!s) fail(`Agendamento "${id}" não encontrado.`);
+
+    const maestro = new Maestro();
+    await maestro.init();
+    const jobs = maestro.enqueueSchedule(s);
+    ok(`${jobs.length} job(s) enfileirado(s) a partir do agendamento "${s.name}".`);
+
+    maestro.queue.on('finished', (_j, result) => {
+      info(`  ${result.runId}: ${result.status}`);
+    });
+
+    await maestro.queue.waitForIdle();
+    await maestro.shutdown();
+  });
+
+schedule
+  .command('tick')
+  .description('Dispara os agendamentos que estiverem no horário agora (chamado pelo Agendador de Tarefas do Windows)')
+  .action(async () => {
+    const maestro = new Maestro();
+    await maestro.init();
+
+    const result = runDueSchedules(maestro, new Date());
+
+    await maestro.queue.waitForIdle();
+    await maestro.shutdown();
+
+    info(`  ${result.checked} agendamento(s) avaliado(s), ${result.fired.length} disparado(s), ${result.skipped.length} pulado(s).`);
+    for (const f of result.fired) info(`  ✔ ${f.schedule.name} → ${f.jobs.length} job(s)`);
+    for (const sk of result.skipped) info(`  ✖ ${sk.schedule.name}: ${sk.reason}`);
+  });
+
+schedule
+  .command('install-task')
+  .description('Registra no Agendador de Tarefas do Windows uma tarefa única que roda "schedule tick" periodicamente (RN-007: sempre headless)')
+  .option('--interval-minutes <n>', 'intervalo entre checagens', '5')
+  .option('--dry-run', 'mostra o comando schtasks sem executá-lo')
+  .action(async (opts: { intervalMinutes: string; dryRun?: boolean }) => {
+    const intervalMinutes = Number(opts.intervalMinutes);
+    if (!Number.isInteger(intervalMinutes) || intervalMinutes < 1) fail('--interval-minutes precisa ser um inteiro >= 1.');
+
+    if (opts.dryRun) {
+      const args = buildInstallArgs({ intervalMinutes });
+      // Só adiciona aspas para exibição em argumentos que ainda não têm as suas
+      // próprias (o valor de /tr já vem citado por buildTickCommand).
+      const display = args.map((a) => (a.includes(' ') && !a.startsWith('"') ? `"${a}"` : a)).join(' ');
+      info('  Comando que seria executado (nada foi alterado):');
+      info(`  schtasks ${display}`);
+      return;
+    }
+
+    try {
+      await installWindowsTask({ intervalMinutes });
+      ok(`Tarefa "${TICK_TASK_NAME}" registrada, checando a cada ${intervalMinutes} minuto(s).`);
+      info('  Não testado contra um Agendador de Tarefas real neste ambiente de desenvolvimento (R-01) —');
+      info('  confirme com "maestro schedule task-status" e, se algo não bater, "schedule install-task --dry-run".');
+    } catch (err) {
+      fail(err instanceof Error ? err.message : String(err));
+    }
+  });
+
+schedule
+  .command('uninstall-task')
+  .description('Remove a tarefa do Agendador de Tarefas do Windows')
+  .action(async () => {
+    try {
+      await uninstallWindowsTask();
+      ok('Tarefa removida do Agendador de Tarefas do Windows.');
+    } catch (err) {
+      fail(err instanceof Error ? err.message : String(err));
+    }
+  });
+
+schedule
+  .command('task-status')
+  .description('Consulta se a tarefa está registrada no Agendador de Tarefas do Windows')
+  .action(async () => {
+    try {
+      const status = await windowsTaskStatus();
+      if (!status.installed) return info('Tarefa não registrada. Use "maestro schedule install-task".');
+      ok('Tarefa registrada.');
+      if (status.raw) info(status.raw);
+    } catch (err) {
+      fail(err instanceof Error ? err.message : String(err));
+    }
   });
 
 /* ─────────────────────────  FILA E HISTÓRICO  ───────────────────────── */

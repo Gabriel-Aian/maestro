@@ -4,6 +4,7 @@ import { NON_RETRYABLE_STEPS, type AppConfig, type Flow, type FlowStep, type Run
 import { resolveElement, resolveFrame, ElementNotResolvedError } from './selectors.js';
 import { detectBlock, type BlockReason, type DetectBlockOptions } from './blockDetection.js';
 import { RunArtifacts } from './artifacts.js';
+import { computeStepDelay } from './timing.js';
 import { registerSecret, runLogger } from '../logger.js';
 
 export class BlockedError extends Error {
@@ -171,6 +172,9 @@ export async function replayFlow(options: ReplayOptions): Promise<RunResult> {
           break;
         }
       }
+
+      const stepDelay = computeStepDelay(i, step, flow, config);
+      if (stepDelay > 0 && !session.page.isClosed()) await session.page.waitForTimeout(stepDelay);
 
       const result = await runStep(session, step, variables, config, artifacts, log);
       steps.push(result);

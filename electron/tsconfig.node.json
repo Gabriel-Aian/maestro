@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    // DOM entra aqui não porque o processo principal usa `window`/`document`,
+    // mas porque ele importa `src/index.ts`, cujo grafo inclui
+    // `recorder/injected.ts` (roda NA PÁGINA de propósito — ver CLAUDE.md) e
+    // `replay.ts`'s `page.evaluate()`. O tsconfig raiz do núcleo já resolve
+    // essa mesma tensão do mesmo jeito.
+    "lib": ["ES2022", "DOM"],
+    "types": ["node", "electron-vite/node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true
+  },
+  "include": ["main/**/*.ts", "preload/**/*.ts", "../electron.vite.config.ts"]
+}

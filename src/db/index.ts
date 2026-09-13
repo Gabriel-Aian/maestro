@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { paths, ensureDataDirs } from '../config/paths.js';
 import { logger } from '../logger.js';
-import type { Profile, ProfileStatus, RunResult, RunStatus } from '../types/schema.js';
+import type { Profile, ProfileStatus, RunResult, RunStatus, Schedule, ScheduleTarget } from '../types/schema.js';
 
 /**
  * Persistência local em SQLite.
@@ -77,6 +77,24 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       );
       CREATE INDEX idx_runs_started ON runs (started_at DESC);
       CREATE INDEX idx_runs_status  ON runs (status, started_at DESC);
+    `,
+  },
+  {
+    version: 2,
+    sql: `
+      CREATE TABLE schedules (
+        id             TEXT PRIMARY KEY,
+        name           TEXT NOT NULL,
+        cron           TEXT NOT NULL,
+        enabled        INTEGER NOT NULL DEFAULT 1,
+        target_json    TEXT NOT NULL,
+        created_at     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL,
+        last_run_at    TEXT,
+        last_status    TEXT,
+        last_fired_key TEXT
+      );
+      CREATE INDEX idx_schedules_enabled ON schedules (enabled);
     `,
   },
 ];
@@ -249,6 +267,11 @@ export const runs = {
       );
   },
 
+  /** Uma execução por id, com o detalhe por passo (`steps_json`) incluído. */
+  get(id: string): Record<string, unknown> | undefined {
+    return getDb().prepare('SELECT * FROM runs WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+  },
+
   /** Histórico paginado — nunca carrega o conjunto completo (RNF-011). */
   list(filter: { status?: RunStatus; kind?: string; limit?: number; offset?: number } = {}): Array<Record<string, unknown>> {
     const clauses: string[] = [];
@@ -322,3 +345,72 @@ export const runs = {
     };
   },
 };
+
+/* ─────────────────────────  AGENDAMENTOS  ───────────────────────── */
+
+export const schedules = {
+  insert(schedule: Schedule): void {
+    getDb()
+      .prepare(
+        `INSERT INTO schedules (id, name, cron, enabled, target_json, created_at, updated_at, last_run_at, last_status, last_fired_key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        schedule.id,
+        schedule.name,
+        schedule.cron,
+        schedule.enabled ? 1 : 0,
+        JSON.stringify(schedule.target),
+        schedule.createdAt,
+        schedule.updatedAt,
+        schedule.lastRunAt,
+        schedule.lastStatus,
+        schedule.lastFiredKey,
+      );
+  },
+
+  list(): Schedule[] {
+    const rows = getDb().prepare('SELECT * FROM schedules ORDER BY created_at').all() as Array<Record<string, unknown>>;
+    return rows.map(rowToSchedule);
+  },
+
+  find(idOrName: string): Schedule | null {
+    const row = getDb().prepare('SELECT * FROM schedules WHERE id = ? OR name = ?').get(idOrName, idOrName) as
+      | Record<string, unknown>
+      | undefined;
+    return row ? rowToSchedule(row) : null;
+  },
+
+  setEnabled(id: string, enabled: boolean): void {
+    getDb().prepare('UPDATE schedules SET enabled = ? WHERE id = ?').run(enabled ? 1 : 0, id);
+  },
+
+  remove(id: string): void {
+    getDb().prepare('DELETE FROM schedules WHERE id = ?').run(id);
+  },
+
+  /** Registra que o agendamento disparou agora — idempotência do tick (`lastFiredKey`). */
+  recordFire(id: string, firedKey: string): void {
+    getDb().prepare('UPDATE schedules SET last_fired_key = ? WHERE id = ?').run(firedKey, id);
+  },
+
+  /** Registra o resultado do job que esse agendamento originou. */
+  recordRun(id: string, run: { at: string; status: string }): void {
+    getDb().prepare('UPDATE schedules SET last_run_at = ?, last_status = ? WHERE id = ?').run(run.at, run.status, id);
+  },
+};
+
+function rowToSchedule(row: Record<string, unknown>): Schedule {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    cron: String(row.cron),
+    enabled: Number(row.enabled) === 1,
+    target: JSON.parse(String(row.target_json)) as ScheduleTarget,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    lastRunAt: row.last_run_at ? String(row.last_run_at) : null,
+    lastStatus: row.last_status ? String(row.last_status) : null,
+    lastFiredKey: row.last_fired_key ? String(row.last_fired_key) : null,
+  };
+}

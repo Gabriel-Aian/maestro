@@ -1,0 +1,410 @@
+:root {
+  --bg: #f5f5f4;
+  --surface: #ffffff;
+  --border: #e2e2e0;
+  --text: #1c1c1a;
+  --text-muted: #706f6c;
+  --accent: #2f6f4f;
+  --accent-hover: #255b40;
+  --danger: #b3402a;
+  --danger-hover: #96331f;
+  --sidebar-bg: #20211f;
+  --sidebar-text: #d8d7d2;
+  --sidebar-text-active: #ffffff;
+  --sidebar-accent: #4f9d72;
+
+  --status-pending: #8a6d1f;
+  --status-pending-bg: #fbf0d4;
+  --status-running: #1f6f8a;
+  --status-running-bg: #dcf0f6;
+  --status-done: #2f6f4f;
+  --status-done-bg: #e1f2e7;
+  --status-failed: #b3402a;
+  --status-failed-bg: #fbe4de;
+  --status-cancelled: #706f6c;
+  --status-cancelled-bg: #ececea;
+  --status-blocked: #7a3ea8;
+  --status-blocked-bg: #f0e4f7;
+
+  --radius: 8px;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 6px rgba(0, 0, 0, 0.04);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+#root {
+  height: 100vh;
+}
+
+.app-shell {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 208px;
+  flex-shrink: 0;
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
+  display: flex;
+  flex-direction: column;
+  padding: 20px 12px;
+}
+
+.sidebar h1 {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--sidebar-text-active);
+  margin: 0 8px 20px;
+}
+
+.nav-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  border-radius: var(--radius);
+  border: none;
+  background: transparent;
+  color: var(--sidebar-text);
+  font-size: 13.5px;
+  cursor: pointer;
+  margin-bottom: 2px;
+}
+
+.nav-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.nav-item.active {
+  background: rgba(79, 157, 114, 0.18);
+  color: var(--sidebar-text-active);
+  font-weight: 600;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding: 8px;
+  font-size: 11px;
+  color: #8b8a86;
+  line-height: 1.5;
+}
+
+.main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 36px;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  gap: 16px;
+}
+
+.page-header h2 {
+  font-size: 20px;
+  margin: 0;
+}
+
+.page-header p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+thead th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: #fafaf9;
+  white-space: nowrap;
+}
+
+tbody td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr:hover {
+  background: #fafaf9;
+}
+
+.mono {
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge-pending {
+  color: var(--status-pending);
+  background: var(--status-pending-bg);
+}
+.badge-running {
+  color: var(--status-running);
+  background: var(--status-running-bg);
+}
+.badge-done,
+.badge-success {
+  color: var(--status-done);
+  background: var(--status-done-bg);
+}
+.badge-failed,
+.badge-timeout {
+  color: var(--status-failed);
+  background: var(--status-failed-bg);
+}
+.badge-cancelled {
+  color: var(--status-cancelled);
+  background: var(--status-cancelled-bg);
+}
+.badge-blocked {
+  color: var(--status-blocked);
+  background: var(--status-blocked-bg);
+}
+
+.btn {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: #fafaf9;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+.btn-primary:hover {
+  background: var(--accent-hover);
+}
+
+.btn-danger {
+  background: var(--surface);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.btn-danger:hover {
+  background: var(--danger);
+  color: white;
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--accent);
+  padding: 5px 10px;
+}
+.btn-ghost:hover {
+  background: #ececea;
+  color: var(--accent-hover);
+}
+.btn-ghost:disabled {
+  color: var(--text-muted);
+}
+
+.btn-ghost-danger {
+  background: transparent;
+  border-color: transparent;
+  color: var(--danger);
+  padding: 5px 10px;
+}
+.btn-ghost-danger:hover {
+  background: var(--status-failed-bg);
+  color: var(--danger-hover);
+}
+.btn-ghost-danger:disabled {
+  color: var(--text-muted);
+}
+
+select,
+input[type='text'] {
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.empty-state {
+  padding: 48px 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13.5px;
+}
+
+.error-banner {
+  background: var(--status-failed-bg);
+  color: var(--status-failed);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.text-muted {
+  color: var(--text-muted);
+}
+
+.section-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0 0 10px;
+}
+
+/* ─────────────────────  WIDGET DE LOGIN  ─────────────────────
+ * Janela separada (frame:false, transparent:true) — só o .widget-card deve
+ * ter fundo visível; body/#root ficam transparentes para a janela do SO
+ * não pintar um retângulo opaco por baixo do cartão.
+ */
+body.widget-mode {
+  background: transparent;
+}
+
+body.widget-mode #root {
+  height: auto;
+}
+
+.widget-card {
+  width: 100%;
+  border-radius: 14px;
+  background: rgba(26, 27, 25, 0.86);
+  backdrop-filter: blur(6px);
+  color: #fff;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+  font-size: 12.5px;
+  user-select: none;
+}
+
+.widget-drag {
+  height: 10px;
+  -webkit-app-region: drag;
+}
+
+.widget-body {
+  padding: 2px 14px 12px;
+  -webkit-app-region: no-drag;
+}
+
+.widget-title {
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+
+.widget-status {
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 10px;
+}
+
+.widget-error {
+  color: #ffb4a3;
+  margin-bottom: 8px;
+}
+
+.widget-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.widget-btn {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 11px;
+  border-radius: 7px;
+  border: none;
+  cursor: pointer;
+}
+
+.widget-btn-ghost {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.75);
+}
+.widget-btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.widget-btn-primary {
+  background: var(--sidebar-accent);
+  color: #fff;
+}
+.widget-btn-primary:hover {
+  background: #418861;
+}
+.widget-btn-primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

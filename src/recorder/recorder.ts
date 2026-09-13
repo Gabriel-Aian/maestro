@@ -229,6 +229,9 @@ export function compileEvents(events: TimedEvent[]): FlowStep[] {
       // o motor já aguarda o elemento ficar visível antes de interagir (RF-043),
       // o que cobre a maioria dos casos sem inflar o fluxo com waits fixos.
       note: gap > 3_000 ? `Intervalo observado na gravação: ${Math.round(gap / 1000)}s` : undefined,
+      // Valor bruto guardado sempre (independente do limiar do `note` acima),
+      // para materializeTimingSteps poder aplicar seu próprio corte depois.
+      recordedGapMs: previousTime === null ? undefined : gap,
       observedUrl: ev.url,
       ...partial,
     } as FlowStep);
@@ -375,6 +378,59 @@ export function compileEvents(events: TimedEvent[]): FlowStep[] {
   }
 
   return steps.map((step, index) => ({ ...step, index }));
+}
+
+/* ─────────────────────────  CONVERSÃO DE INTERVALOS  ───────────────────────── */
+
+export interface MaterializeTimingsOptions {
+  /** Intervalos abaixo disso são ignorados: ruído de digitação/leitura, não pausa real. */
+  minMs?: number;
+  /** Teto aplicado ao intervalo convertido — sem isso, uma pausa real de minutos
+   *  vira uma espera fixa de minutos na reprodução, o que não é a intenção. */
+  maxMs?: number;
+}
+
+export const DEFAULT_TIMING_MIN_MS = 3_000;
+export const DEFAULT_TIMING_MAX_MS = 30_000;
+
+/**
+ * Converte os intervalos observados na gravação (`recordedGapMs`) em passos
+ * `waitForTimeout` reais, inseridos imediatamente antes do passo que os
+ * seguiu. É pura por propósito, como `compileEvents` — opera sobre passos já
+ * compilados, sem tocar navegador nem arquivo (RNF-022).
+ *
+ * Fluxos gravados antes deste campo existir não têm `recordedGapMs` e, por
+ * isso, não têm nada para converter — não há tentativa de recuperar o valor
+ * a partir do texto arredondado em `note`.
+ *
+ * `recordedGapMs` é limpo do passo original depois de convertido: o gap virou
+ * um passo real, então rodar a conversão de novo sobre o resultado é uma
+ * operação neutra em vez de inserir a mesma espera outra vez.
+ */
+export function materializeTimingSteps(steps: FlowStep[], opts: MaterializeTimingsOptions = {}): FlowStep[] {
+  const minMs = opts.minMs ?? DEFAULT_TIMING_MIN_MS;
+  const maxMs = opts.maxMs ?? DEFAULT_TIMING_MAX_MS;
+
+  const withWaits: FlowStep[] = [];
+  for (const step of steps) {
+    if (step.recordedGapMs !== undefined && step.recordedGapMs >= minMs) {
+      withWaits.push({
+        type: 'waitForTimeout',
+        index: 0,
+        frame: [],
+        timeoutMs: 15_000,
+        onFailure: 'abort' as const,
+        maxRetries: 0,
+        screenshot: false,
+        ms: Math.min(step.recordedGapMs, maxMs),
+      } as FlowStep);
+      withWaits.push({ ...step, recordedGapMs: undefined });
+    } else {
+      withWaits.push(step);
+    }
+  }
+
+  return withWaits.map((step, index) => ({ ...step, index }));
 }
 
 /* ─────────────────────────  HELPERS  ───────────────────────── */

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { validate as validateCronExpression } from 'node-cron';
 
 /* ─────────────────────────  SELETORES  ───────────────────────── */
 
@@ -61,6 +62,16 @@ export const FrameRefSchema = z.object({
 });
 export type FrameRef = z.infer<typeof FrameRefSchema>;
 
+/**
+ * Faixa [min, max] em ms para sorteio uniforme de um atraso — nunca um valor
+ * fixo (RN-008). Reaproveitada em três granularidades: configuração global,
+ * fluxo e passo (delay entre passos), e pesquisas (delay entre buscas).
+ */
+export const DelayRangeSchema = z
+  .tuple([z.number().int().min(0), z.number().int().min(0)])
+  .refine(([min, max]) => min <= max, { message: 'faixa de delay: min precisa ser <= max' });
+export type DelayRange = z.infer<typeof DelayRangeSchema>;
+
 /* ─────────────────────────  PASSOS DE FLUXO  ───────────────────────── */
 
 const stepBase = {
@@ -78,6 +89,14 @@ const stepBase = {
    * foi gravado, passar por ela de novo é esperado, não sessão expirada.
    */
   observedUrl: z.string().optional(),
+  /**
+   * Intervalo bruto (ms) observado antes deste passo durante a gravação.
+   * Guardado sempre, independente do limiar usado para gerar `note` (que é só
+   * para leitura humana) — é o que alimenta a conversão em passos reais.
+   */
+  recordedGapMs: z.number().int().min(0).optional(),
+  /** Delay antes deste passo especificamente, sobrepondo fluxo e global. */
+  delayMs: DelayRangeSchema.optional(),
 };
 
 const withSelectors = {
@@ -150,21 +169,19 @@ export const FlowSchema = z.object({
   updatedAt: z.string(),
   /** Marcado quando algum passo usou seletor de fallback (RN-006). */
   needsReview: z.boolean().default(false),
+  /** Delay entre passos para todo o fluxo, sobrepondo o padrão global. */
+  stepDelayMs: DelayRangeSchema.optional(),
 });
 export type Flow = z.infer<typeof FlowSchema>;
 
 /* ─────────────────────────  PESQUISAS  ───────────────────────── */
-
-const delayRange = z
-  .tuple([z.number().int().min(0), z.number().int().min(0)])
-  .refine(([min, max]) => min <= max, { message: 'delayBetweenSearchesMs: min precisa ser <= max' });
 
 export const SearchDefaultsSchema = z.object({
   browser: z.string().default('chrome'),
   profile: z.string().optional(),
   engine: z.string().default('google'),
   headless: z.boolean().default(true),
-  delayBetweenSearchesMs: delayRange.default([4_000, 12_000]),
+  delayBetweenSearchesMs: DelayRangeSchema.default([4_000, 12_000]),
   screenshot: z.enum(['none', 'after', 'both']).default('none'),
   maxRetries: z.number().int().min(0).max(5).default(2),
 });
@@ -188,7 +205,7 @@ export const ThemeSchema = z.object({
   profile: z.string().optional(),
   browser: z.string().optional(),
   headless: z.boolean().optional(),
-  delayBetweenSearchesMs: delayRange.optional(),
+  delayBetweenSearchesMs: DelayRangeSchema.optional(),
   screenshot: z.enum(['none', 'after', 'both']).optional(),
   queries: z.array(QuerySchema).min(1),
 });
@@ -292,6 +309,20 @@ export const AppConfigSchema = z.object({
   jobTimeoutMs: z.number().int().positive().default(15 * 60_000),
   /** Ociosidade antes de encerrar navegador reaproveitado (RF-055). */
   browserIdleTtlMs: z.number().int().min(0).default(60_000),
+  /**
+   * Delay padrão entre passos de fluxo, sorteado dentro da faixa (RN-008).
+   * `[0, 0]` (padrão) desliga o recurso — o motor já espera cada elemento
+   * ficar pronto antes de interagir; isto é só para pacing deliberado.
+   */
+  defaultStepDelayMs: DelayRangeSchema.default([0, 0]),
+  /**
+   * Espaçamento entre o fim de um job e o início do próximo NO MESMO PERFIL,
+   * sorteado dentro da faixa (RN-008). Distinto do mutex de RN-001: aquele
+   * impede execução simultânea; este pausa entre execuções sucessivas da
+   * mesma conta, para não encadeá-las sem intervalo algum. `[0, 0]` (padrão)
+   * desliga o recurso.
+   */
+  jobDelayMs: DelayRangeSchema.default([0, 0]),
   retention: z
     .object({
       maxAgeDays: z.number().int().positive().default(30),
@@ -306,3 +337,50 @@ export const AppConfigSchema = z.object({
   detectLoginWall: z.boolean().default(true),
 });
 export type AppConfig = z.infer<typeof AppConfigSchema>;
+
+/* ─────────────────────────  AGENDAMENTO  ───────────────────────── */
+
+/**
+ * O que um agendamento dispara. Reaproveita exatamente os mesmos caminhos de
+ * `Maestro.enqueueFlow`/`enqueueSearches` — um agendamento não é um modo de
+ * execução paralelo, é só mais um produtor de jobs para a fila existente.
+ *
+ * Note a ausência de `headless`: execução agendada é sempre headless (RN-007).
+ * A sessão do Windows pode estar bloqueada quando o disparo acontece, e
+ * automação visível não funciona nesse cenário — não há opção "headed" aqui
+ * porque não existe forma segura de honrá-la sem supervisão humana.
+ */
+export const ScheduleTargetSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('flow'),
+    flowId: z.string().min(1),
+    profile: z.string().min(1),
+    variables: z.record(z.string(), z.string()).default({}),
+  }),
+  z.object({
+    kind: z.literal('search'),
+    searchFile: z.string().min(1),
+    themeIds: z.array(z.string()).optional(),
+  }),
+]);
+export type ScheduleTarget = z.infer<typeof ScheduleTargetSchema>;
+
+export const ScheduleSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  /** Padrão cron de 5 ou 6 campos (node-cron aceita segundos opcionais). */
+  cron: z.string().min(1).refine((expr) => validateCronExpression(expr), { message: 'expressão cron inválida' }),
+  enabled: z.boolean().default(true),
+  target: ScheduleTargetSchema,
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  lastRunAt: z.string().nullable().default(null),
+  lastStatus: z.string().nullable().default(null),
+  /**
+   * Minuto (ISO truncado) do último disparo — idempotência do tick: dois
+   * invocações de `schedule tick` que caiam no mesmo minuto não disparam o
+   * mesmo agendamento duas vezes.
+   */
+  lastFiredKey: z.string().nullable().default(null),
+});
+export type Schedule = z.infer<typeof ScheduleSchema>;

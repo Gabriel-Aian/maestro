@@ -7,7 +7,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx src/cli.ts",
     "test": "vitest run",
-    "cli": "node dist/cli.js"
+    "cli": "node dist/cli.js",
+    "electron:typecheck": "tsc -p electron/tsconfig.node.json && tsc -p electron/tsconfig.web.json",
+    "electron:dev": "electron-vite dev",
+    "electron:build": "electron-vite build",
+    "electron:preview": "electron-vite preview"
   },
   "keywords": [],
   "author": "",
@@ -22,12 +26,21 @@
   "devDependencies": {
     "@types/jsdom": "^30.0.0",
     "@types/node": "^22.20.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^44.3.0",
+    "electron-vite": "^5.0.0",
     "jsdom": "^30.0.1",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
+    "vite": "^7.3.6",
     "vitest": "^5.0.0"
   },
   "type": "module",
+  "main": "out/main/index.js",
   "bin": {
     "maestro": "./dist/cli.js"
   },
