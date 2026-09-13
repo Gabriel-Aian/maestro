@@ -164,4 +164,42 @@ describe('expandSearches', () => {
       for (const s of result) expect(s.query.startsWith('a')).toBe(true);
     });
   });
+
+  describe('overrides de invocação — engine e delayRangeMs', () => {
+    it('sobrescreve o mecanismo declarado no arquivo para todas as pesquisas', () => {
+      const file = parse({
+        ...base,
+        themes: [
+          { id: 't1', name: 'A', engine: 'bing', queries: ['a'] },
+          { id: 't2', name: 'B', queries: ['b'] }, // herda google de defaults
+        ],
+      });
+      const result = expandSearches(file, { engine: 'duckduckgo' });
+      expect(result.every((s) => s.engine === 'duckduckgo')).toBe(true);
+    });
+
+    it('rejeita um id de mecanismo desconhecido antes de devolver qualquer pesquisa', () => {
+      const file = parse(base);
+      expect(() => expandSearches(file, { engine: 'nao-existe' })).toThrow(/Mecanismo de busca desconhecido/);
+    });
+
+    it('sobrescreve delayBetweenSearchesMs do arquivo para todas as pesquisas', () => {
+      const file = parse({
+        ...base,
+        defaults: { ...base.defaults, delayBetweenSearchesMs: [4_000, 12_000] },
+        themes: [{ id: 't1', name: 'A', queries: ['a', 'b'] }],
+      });
+      const result = expandSearches(file, { delayRangeMs: [5_000, 10_000] });
+      expect(result.every((s) => s.delayRange[0] === 5_000 && s.delayRange[1] === 10_000)).toBe(true);
+    });
+
+    it('sem overrides preserva o que o arquivo declarou', () => {
+      const file = parse({
+        ...base,
+        themes: [{ id: 't1', name: 'A', engine: 'bing', queries: ['a'] }],
+      });
+      const [result] = expandSearches(file);
+      expect(result!.engine).toBe('bing');
+    });
+  });
 });

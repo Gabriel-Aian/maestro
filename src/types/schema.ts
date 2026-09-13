@@ -363,6 +363,10 @@ export const ScheduleTargetSchema = z.discriminatedUnion('kind', [
     themeIds: z.array(z.string()).optional(),
     /** Sorteia esse número de pesquisas do total já filtrado, sem repetir dentro do disparo — omitido roda todas. */
     sampleSize: z.number().int().positive().optional(),
+    /** Sobrescreve o mecanismo declarado no arquivo (defaults/tema) para todo disparo — omitido usa o que o arquivo definir. */
+    engine: z.string().optional(),
+    /** Sobrescreve `delayBetweenSearchesMs` do arquivo para todo disparo — omitido usa o que o arquivo definir. */
+    delayRangeMs: DelayRangeSchema.optional(),
   }),
 ]);
 export type ScheduleTarget = z.infer<typeof ScheduleTargetSchema>;

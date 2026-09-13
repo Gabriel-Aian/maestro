@@ -18,6 +18,7 @@ import { launchProfile, isProfileLocked, openProfilePlain } from './browsers/lau
 import { RecordingSession, materializeTimingSteps, DEFAULT_TIMING_MIN_MS, DEFAULT_TIMING_MAX_MS } from './recorder/recorder.js';
 import { saveFlow, loadFlow, listFlowVersions, restoreFlowVersion } from './store/flowStore.js';
 import { loadSearchFile, validateSearchFile, expandSearches } from './search/searchFile.js';
+import { getEngine } from './search/engines.js';
 import { replayFlow } from './engine/replay.js';
 import { Maestro } from './orchestrator.js';
 import { loadConfig, saveConfig } from './config/config.js';
@@ -409,26 +410,57 @@ search
   .description('Executa as pesquisas do arquivo (RF-016 a RF-020)')
   .option('-t, --themes <ids>', 'restringe a temas específicos, separados por vírgula')
   .option('-n, --sample-size <n>', 'sorteia apenas N pesquisas do total (sem repetir), em vez de rodar todas')
-  .action(async (file: string, opts: { themes?: string; sampleSize?: string }) => {
-    const maestro = new Maestro();
-    await maestro.init();
+  .option('-e, --engine <id>', 'sobrescreve o mecanismo de busca do arquivo (ex.: google, bing, duckduckgo)')
+  .option('--delay-min <ms>', 'sobrescreve o atraso mínimo entre pesquisas, em ms (exige --delay-max)')
+  .option('--delay-max <ms>', 'sobrescreve o atraso máximo entre pesquisas, em ms (exige --delay-min)')
+  .option('--headed', 'roda com o navegador visível, para depurar (padrão: conforme o arquivo/configuração)')
+  .action(
+    async (
+      file: string,
+      opts: { themes?: string; sampleSize?: string; engine?: string; delayMin?: string; delayMax?: string; headed?: boolean },
+    ) => {
+      const maestro = new Maestro();
+      await maestro.init();
 
-    const themeIds = opts.themes?.split(',').map((t) => t.trim());
-    const sampleSize = opts.sampleSize ? Number(opts.sampleSize) : undefined;
-    if (sampleSize !== undefined && (!Number.isInteger(sampleSize) || sampleSize < 1)) {
-      fail('--sample-size precisa ser um número inteiro maior ou igual a 1.');
-    }
-    const jobs = maestro.enqueueSearches(file, { themeIds, sampleSize });
-    ok(`${jobs.length} job(s) enfileirado(s), um por perfil.`);
+      const themeIds = opts.themes?.split(',').map((t) => t.trim());
+      const sampleSize = opts.sampleSize ? Number(opts.sampleSize) : undefined;
+      if (sampleSize !== undefined && (!Number.isInteger(sampleSize) || sampleSize < 1)) {
+        fail('--sample-size precisa ser um número inteiro maior ou igual a 1.');
+      }
+      if (Boolean(opts.delayMin) !== Boolean(opts.delayMax)) {
+        fail('--delay-min e --delay-max precisam ser usados juntos.');
+      }
+      const delayRangeMs: [number, number] | undefined = opts.delayMin ? [Number(opts.delayMin), Number(opts.delayMax)] : undefined;
+      if (delayRangeMs && delayRangeMs.some((n) => !Number.isInteger(n) || n < 0)) {
+        fail('--delay-min/--delay-max precisam ser inteiros maiores ou iguais a 0.');
+      }
+      if (delayRangeMs && delayRangeMs[0] > delayRangeMs[1]) {
+        fail('--delay-min precisa ser <= --delay-max.');
+      }
 
-    maestro.queue.on('finished', (_j, result) => {
-      const okCount = result.steps.filter((step) => step.status === 'success').length;
-      info(`  ${result.runId}: ${result.status} — ${okCount}/${result.steps.length} pesquisas concluídas`);
-    });
+      let jobs;
+      try {
+        jobs = maestro.enqueueSearches(file, {
+          themeIds,
+          sampleSize,
+          engine: opts.engine,
+          delayRangeMs,
+          forceHeadless: opts.headed ? false : undefined,
+        });
+      } catch (err) {
+        fail(formatError(err));
+      }
+      ok(`${jobs.length} job(s) enfileirado(s), um por perfil.`);
 
-    await maestro.queue.waitForIdle();
-    await maestro.shutdown();
-  });
+      maestro.queue.on('finished', (_j, result) => {
+        const okCount = result.steps.filter((step) => step.status === 'success').length;
+        info(`  ${result.runId}: ${result.status} — ${okCount}/${result.steps.length} pesquisas concluídas`);
+      });
+
+      await maestro.queue.waitForIdle();
+      await maestro.shutdown();
+    },
+  );
 
 /* ─────────────────────────  AGENDAMENTO  ───────────────────────── */
 
@@ -468,6 +500,9 @@ schedule
   .option('--search <file>', 'agenda um arquivo de pesquisas (exclusivo com --flow)')
   .option('--themes <ids>', 'restringe a temas específicos, separados por vírgula (com --search)')
   .option('--sample-size <n>', 'sorteia apenas N pesquisas do total a cada disparo, sem repetir (com --search)')
+  .option('--engine <id>', 'sobrescreve o mecanismo de busca do arquivo a cada disparo (com --search)')
+  .option('--delay-min <ms>', 'sobrescreve o atraso mínimo entre pesquisas, em ms (com --search, exige --delay-max)')
+  .option('--delay-max <ms>', 'sobrescreve o atraso máximo entre pesquisas, em ms (com --search, exige --delay-min)')
   .action(
     (
       name: string,
@@ -479,6 +514,9 @@ schedule
         search?: string;
         themes?: string;
         sampleSize?: string;
+        engine?: string;
+        delayMin?: string;
+        delayMax?: string;
       },
     ) => {
       if (Boolean(opts.flow) === Boolean(opts.search)) {
@@ -498,11 +536,21 @@ schedule
         if (sampleSize !== undefined && (!Number.isInteger(sampleSize) || sampleSize < 1)) {
           fail('--sample-size precisa ser um número inteiro maior ou igual a 1.');
         }
+        if (opts.engine) getEngine(opts.engine); // valida o id cedo, antes de gravar o agendamento
+        if (Boolean(opts.delayMin) !== Boolean(opts.delayMax)) {
+          fail('--delay-min e --delay-max precisam ser usados juntos.');
+        }
+        const delayRangeMs: [number, number] | undefined = opts.delayMin ? [Number(opts.delayMin), Number(opts.delayMax)] : undefined;
+        if (delayRangeMs && (delayRangeMs.some((n) => !Number.isInteger(n) || n < 0) || delayRangeMs[0] > delayRangeMs[1])) {
+          fail('--delay-min/--delay-max precisam ser inteiros >= 0, com min <= max.');
+        }
         target = {
           kind: 'search',
           searchFile: opts.search!,
           themeIds: opts.themes?.split(',').map((t) => t.trim()),
           sampleSize,
+          engine: opts.engine,
+          delayRangeMs,
         };
       }
 
@@ -552,7 +600,7 @@ schedule
       `  Alvo:      ${
         s.target.kind === 'flow'
           ? `fluxo ${s.target.flowId} (perfil ${s.target.profile})`
-          : `pesquisas ${s.target.searchFile}${s.target.themeIds ? ` [${s.target.themeIds.join(', ')}]` : ''}${s.target.sampleSize ? ` — ${s.target.sampleSize} por disparo` : ''}`
+          : `pesquisas ${s.target.searchFile}${s.target.themeIds ? ` [${s.target.themeIds.join(', ')}]` : ''}${s.target.sampleSize ? ` — ${s.target.sampleSize} por disparo` : ''}${s.target.engine ? ` — engine: ${s.target.engine}` : ''}${s.target.delayRangeMs ? ` — delay: ${s.target.delayRangeMs[0]}-${s.target.delayRangeMs[1]}ms` : ''}`
       }`,
     );
     info(`  Última:    ${s.lastRunAt ? `${s.lastRunAt} — ${s.lastStatus}` : 'nunca rodou'}`);

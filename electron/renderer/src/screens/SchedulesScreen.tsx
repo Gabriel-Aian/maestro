@@ -6,6 +6,7 @@ import type {
   ProfileView,
   ScheduleTargetView,
   ScheduleView,
+  SearchEngineOption,
   SearchThemeView,
   WindowsTaskStatusResult,
 } from '../../../shared/ipc.js';
@@ -315,6 +316,10 @@ function NewScheduleCard({
   const [themes, setThemes] = useState<SearchThemeView[]>([]);
   const [selectedThemes, setSelectedThemes] = useState<Set<string>>(new Set());
   const [sampleSize, setSampleSize] = useState('');
+  const [engines, setEngines] = useState<SearchEngineOption[]>([]);
+  const [engineOverride, setEngineOverride] = useState('');
+  const [delayMinS, setDelayMinS] = useState('');
+  const [delayMaxS, setDelayMaxS] = useState('');
   const [pickError, setPickError] = useState<string | null>(null);
 
   const [busy, setBusy] = useState(false);
@@ -336,6 +341,10 @@ function NewScheduleCard({
       return next;
     });
   }
+
+  useEffect(() => {
+    window.maestro.listSearchEngines().then(setEngines);
+  }, []);
 
   useEffect(() => {
     if (!flowId && flows.length > 0) setFlowId(flows[0]!.id);
@@ -411,11 +420,19 @@ function NewScheduleCard({
       // comportamento do `--themes` opcional da CLI.
       const allSelected = selectedThemes.size === themes.length;
       const n = sampleSize.trim() ? Number(sampleSize) : null;
+      const delayMin = delayMinS.trim() ? Number(delayMinS) : null;
+      const delayMax = delayMaxS.trim() ? Number(delayMaxS) : null;
+      if ((delayMin !== null) !== (delayMax !== null)) {
+        setFormError('Informe os dois campos de atraso (mínimo e máximo), ou deixe ambos em branco.');
+        return;
+      }
       target = {
         kind: 'search',
         searchFile,
         themeIds: allSelected ? null : [...selectedThemes],
         sampleSize: Number.isInteger(n) && n! > 0 ? n : null,
+        engine: engineOverride || null,
+        delayRangeMs: delayMin !== null && delayMax !== null ? [delayMin * 1000, delayMax * 1000] : null,
       };
     }
 
@@ -434,6 +451,9 @@ function NewScheduleCard({
         setThemes([]);
         setSelectedThemes(new Set());
         setSampleSize('');
+        setEngineOverride('');
+        setDelayMinS('');
+        setDelayMaxS('');
         onCreated();
       } else {
         setFormError(result.reason);
@@ -596,17 +616,49 @@ function NewScheduleCard({
             </div>
           )}
           {themes.length > 0 && (
-            <label style={{ fontSize: 13 }}>
-              Rodar apenas{' '}
-              <input
-                type="text"
-                placeholder="todas"
-                value={sampleSize}
-                onChange={(e) => setSampleSize(e.target.value)}
-                style={{ width: 50, textAlign: 'center' }}
-              />{' '}
-              pesquisa(s) sorteada(s) a cada disparo, sem repetir
-            </label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center' }}>
+              <label style={{ fontSize: 13 }}>
+                Rodar apenas{' '}
+                <input
+                  type="text"
+                  placeholder="todas"
+                  value={sampleSize}
+                  onChange={(e) => setSampleSize(e.target.value)}
+                  style={{ width: 50, textAlign: 'center' }}
+                />{' '}
+                pesquisa(s) sorteada(s), sem repetir
+              </label>
+              <label style={{ fontSize: 13 }}>
+                Mecanismo{' '}
+                <select value={engineOverride} onChange={(e) => setEngineOverride(e.target.value)}>
+                  <option value="">do arquivo</option>
+                  {engines.map((eng) => (
+                    <option key={eng.id} value={eng.id}>
+                      {eng.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ fontSize: 13 }}>
+                Atraso entre pesquisas{' '}
+                <input
+                  type="text"
+                  placeholder="arquivo"
+                  value={delayMinS}
+                  onChange={(e) => setDelayMinS(e.target.value)}
+                  style={{ width: 44, textAlign: 'center' }}
+                />{' '}
+                –{' '}
+                <input
+                  type="text"
+                  placeholder="arquivo"
+                  value={delayMaxS}
+                  onChange={(e) => setDelayMaxS(e.target.value)}
+                  style={{ width: 44, textAlign: 'center' }}
+                />{' '}
+                s
+              </label>
+            </div>
           )}
         </div>
       )}
@@ -624,7 +676,9 @@ function describeTarget(target: ScheduleTargetView): string {
   if (target.kind === 'flow') return `fluxo "${target.flowName}" · perfil ${target.profileName}`;
   const themesPart = target.themeIds ? `${target.themeIds.length} tema(s)` : 'todos os temas';
   const samplePart = target.sampleSize ? ` · ${target.sampleSize} sorteada(s)` : '';
-  return `pesquisas · ${themesPart}${samplePart}`;
+  const enginePart = target.engine ? ` · ${target.engine}` : '';
+  const delayPart = target.delayRangeMs ? ` · ${target.delayRangeMs[0] / 1000}-${target.delayRangeMs[1] / 1000}s` : '';
+  return `pesquisas · ${themesPart}${samplePart}${enginePart}${delayPart}`;
 }
 
 function SchedulesTable({

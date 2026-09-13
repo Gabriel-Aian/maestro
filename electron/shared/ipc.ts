@@ -197,6 +197,24 @@ export type LoadSearchFileResult =
 
 export type RunSearchResult = { ok: true; jobIds: string[] } | { ok: false; reason: string };
 
+/** Mecanismos de busca declarados em `src/search/engines.ts` — a GUI nunca hardcoda essa lista. */
+export interface SearchEngineOption {
+  id: string;
+  name: string;
+}
+
+/** Parâmetros opcionais de uma execução manual — sobrescrevem o que o arquivo declarar, sem alterá-lo. */
+export interface RunSearchOptions {
+  themeIds: string[];
+  sampleSize?: number;
+  /** `undefined` mantém o mecanismo do arquivo; um id de `SearchEngineOption` sobrescreve. */
+  engine?: string;
+  /** [min, max] em ms; `undefined` mantém `delayBetweenSearchesMs` do arquivo. */
+  delayRangeMs?: [number, number];
+  /** `true` roda com o navegador visível, para depurar — `undefined`/`false` mantém o padrão de sempre. */
+  headed?: boolean;
+}
+
 /* ─────────────────────────  AGENDAMENTOS  ───────────────────────── */
 
 export interface ScheduleFlowTargetView {
@@ -215,6 +233,10 @@ export interface ScheduleSearchTargetView {
   themeIds: string[] | null;
   /** null = roda todas as pesquisas filtradas; caso contrário, sorteia esse número sem repetir a cada disparo. */
   sampleSize: number | null;
+  /** null = usa o mecanismo declarado no arquivo; caso contrário, sobrescreve a cada disparo. */
+  engine: string | null;
+  /** null = usa `delayBetweenSearchesMs` do arquivo; caso contrário, sobrescreve a cada disparo. */
+  delayRangeMs: [number, number] | null;
 }
 
 export type ScheduleTargetView = ScheduleFlowTargetView | ScheduleSearchTargetView;
@@ -236,7 +258,14 @@ export type CreateScheduleInput = {
   cron: string;
   target:
     | { kind: 'flow'; flowId: string; profileId: string; variables: Record<string, string> }
-    | { kind: 'search'; searchFile: string; themeIds: string[] | null; sampleSize: number | null };
+    | {
+        kind: 'search';
+        searchFile: string;
+        themeIds: string[] | null;
+        sampleSize: number | null;
+        engine: string | null;
+        delayRangeMs: [number, number] | null;
+      };
 };
 
 export type CreateScheduleResult = { ok: true; schedule: ScheduleView } | { ok: false; reason: string };

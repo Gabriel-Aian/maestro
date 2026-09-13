@@ -63,7 +63,14 @@ function toTargetView(target: ScheduleTarget, allProfiles: Profile[], flows: Flo
       variables: target.variables,
     };
   }
-  return { kind: 'search', searchFile: target.searchFile, themeIds: target.themeIds ?? null, sampleSize: target.sampleSize ?? null };
+  return {
+    kind: 'search',
+    searchFile: target.searchFile,
+    themeIds: target.themeIds ?? null,
+    sampleSize: target.sampleSize ?? null,
+    engine: target.engine ?? null,
+    delayRangeMs: target.delayRangeMs ?? null,
+  };
 }
 
 function toScheduleView(s: Schedule, allProfiles: Profile[], flows: FlowIndexRow[]): ScheduleView {
@@ -168,6 +175,8 @@ export function registerScheduleIpcHandlers(): void {
           searchFile: input.target.searchFile,
           themeIds: input.target.themeIds ?? undefined,
           sampleSize: input.target.sampleSize ?? undefined,
+          engine: input.target.engine ?? undefined,
+          delayRangeMs: input.target.delayRangeMs ?? undefined,
         };
       }
 

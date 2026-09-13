@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { FlowRunDetail, LoadSearchFileResult, SearchFileView } from '../../../shared/ipc.js';
+import type { FlowRunDetail, LoadSearchFileResult, SearchEngineOption, SearchFileView } from '../../../shared/ipc.js';
 import { StatusBadge } from '../components/StatusBadge.js';
 import { consumeJobCompletion, useJobEvents, type JobCompletion } from '../jobEvents.js';
 
@@ -23,6 +23,11 @@ export function SearchesScreen() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sampleSize, setSampleSize] = useState('');
+  const [engines, setEngines] = useState<SearchEngineOption[]>([]);
+  const [engineOverride, setEngineOverride] = useState('');
+  const [delayMinS, setDelayMinS] = useState('');
+  const [delayMaxS, setDelayMaxS] = useState('');
+  const [headed, setHeaded] = useState(false);
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [jobs, setJobs] = useState<JobTracker[]>([]);
@@ -51,6 +56,7 @@ export function SearchesScreen() {
       .getLastSearchFile()
       .then(applyResult)
       .finally(() => setLoading(false));
+    window.maestro.listSearchEngines().then(setEngines);
   }, []);
 
   // Ponto central do fluxo pedido: o usuário edita o arquivo por fora (por
@@ -109,11 +115,23 @@ export function SearchesScreen() {
 
   async function run(): Promise<void> {
     if (!filePath) return;
+    const n = sampleSize.trim() ? Number(sampleSize) : undefined;
+    const delayMin = delayMinS.trim() ? Number(delayMinS) : undefined;
+    const delayMax = delayMaxS.trim() ? Number(delayMaxS) : undefined;
+    if ((delayMin !== undefined) !== (delayMax !== undefined)) {
+      setRunError('Informe os dois campos de atraso (mínimo e máximo), ou deixe ambos em branco.');
+      return;
+    }
     setRunning(true);
     setRunError(null);
     setJobs([]);
-    const n = sampleSize.trim() ? Number(sampleSize) : undefined;
-    const result = await window.maestro.runSearch(filePath, [...selected], Number.isInteger(n) && n! > 0 ? n : undefined);
+    const result = await window.maestro.runSearch(filePath, {
+      themeIds: [...selected],
+      sampleSize: Number.isInteger(n) && n! > 0 ? n : undefined,
+      engine: engineOverride || undefined,
+      delayRangeMs: delayMin !== undefined && delayMax !== undefined ? [delayMin * 1000, delayMax * 1000] : undefined,
+      headed,
+    });
     setRunning(false);
     if (result.ok) {
       // consumeJobCompletion() é de uso único — chamado aqui uma vez por
@@ -224,24 +242,59 @@ export function SearchesScreen() {
                   ))}
                 </tbody>
               </table>
-              <div className="toolbar" style={{ padding: '14px', margin: 0 }}>
-                <span className="text-muted">
+              <div style={{ padding: '14px', borderTop: '1px solid var(--border)' }}>
+                <span className="text-muted" style={{ fontSize: 13 }}>
                   {file.totalQueries} pesquisa(s) no total, {selected.size} tema(s) selecionado(s)
                 </span>
-                <label style={{ fontSize: 13 }}>
-                  Rodar apenas{' '}
-                  <input
-                    type="text"
-                    placeholder="todas"
-                    value={sampleSize}
-                    onChange={(e) => setSampleSize(e.target.value)}
-                    style={{ width: 50, textAlign: 'center' }}
-                  />{' '}
-                  pesquisa(s) sorteada(s)
-                </label>
-                <button className="btn btn-primary" disabled={running || selected.size === 0} onClick={run}>
-                  {running ? 'Enfileirando…' : 'Rodar'}
-                </button>
+                <div className="toolbar" style={{ margin: '10px 0 0' }}>
+                  <label style={{ fontSize: 13 }}>
+                    Rodar apenas{' '}
+                    <input
+                      type="text"
+                      placeholder="todas"
+                      value={sampleSize}
+                      onChange={(e) => setSampleSize(e.target.value)}
+                      style={{ width: 50, textAlign: 'center' }}
+                    />{' '}
+                    pesquisa(s) sorteada(s)
+                  </label>
+                  <label style={{ fontSize: 13 }}>
+                    Mecanismo{' '}
+                    <select value={engineOverride} onChange={(e) => setEngineOverride(e.target.value)}>
+                      <option value="">do arquivo</option>
+                      {engines.map((eng) => (
+                        <option key={eng.id} value={eng.id}>
+                          {eng.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={{ fontSize: 13 }}>
+                    Atraso entre pesquisas{' '}
+                    <input
+                      type="text"
+                      placeholder="arquivo"
+                      value={delayMinS}
+                      onChange={(e) => setDelayMinS(e.target.value)}
+                      style={{ width: 44, textAlign: 'center' }}
+                    />{' '}
+                    –{' '}
+                    <input
+                      type="text"
+                      placeholder="arquivo"
+                      value={delayMaxS}
+                      onChange={(e) => setDelayMaxS(e.target.value)}
+                      style={{ width: 44, textAlign: 'center' }}
+                    />{' '}
+                    s
+                  </label>
+                  <label style={{ fontSize: 13 }}>
+                    <input type="checkbox" checked={headed} onChange={(e) => setHeaded(e.target.checked)} /> executar visível (debug)
+                  </label>
+                  <button className="btn btn-primary" disabled={running || selected.size === 0} onClick={run}>
+                    {running ? 'Enfileirando…' : 'Rodar'}
+                  </button>
+                </div>
               </div>
             </div>
           )}

@@ -1,8 +1,8 @@
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron';
-import { SearchFileInvalidError, expandSearches, formatError, loadSearchFile, type SearchFile } from '../../src/index.js';
+import { SEARCH_ENGINES, SearchFileInvalidError, expandSearches, formatError, loadSearchFile, type SearchFile } from '../../src/index.js';
 import { getMaestro } from './maestro.js';
 import { loadPrefs, savePrefs } from './prefs.js';
-import type { LoadSearchFileResult, RunSearchResult, SearchFileView } from '../shared/ipc.js';
+import type { LoadSearchFileResult, RunSearchOptions, RunSearchResult, SearchEngineOption, SearchFileView } from '../shared/ipc.js';
 
 function toView(filePath: string, file: SearchFile): SearchFileView {
   const expanded = expandSearches(file);
@@ -67,15 +67,22 @@ export function registerSearchIpcHandlers(): void {
     shell.showItemInFolder(filePath);
   });
 
-  ipcMain.handle(
-    'maestro:search:run',
-    (_event, input: { filePath: string; themeIds: string[]; sampleSize?: number }): RunSearchResult => {
-      try {
-        const jobs = getMaestro().enqueueSearches(input.filePath, { themeIds: input.themeIds, sampleSize: input.sampleSize });
-        return { ok: true, jobIds: jobs.map((j) => j.id) };
-      } catch (err) {
-        return { ok: false, reason: formatError(err) };
-      }
-    },
+  ipcMain.handle('maestro:search:engines', (): SearchEngineOption[] =>
+    Object.values(SEARCH_ENGINES).map((e) => ({ id: e.id, name: e.name })),
   );
+
+  ipcMain.handle('maestro:search:run', (_event, input: { filePath: string } & RunSearchOptions): RunSearchResult => {
+    try {
+      const jobs = getMaestro().enqueueSearches(input.filePath, {
+        themeIds: input.themeIds,
+        sampleSize: input.sampleSize,
+        engine: input.engine,
+        delayRangeMs: input.delayRangeMs,
+        forceHeadless: input.headed ? false : undefined,
+      });
+      return { ok: true, jobIds: jobs.map((j) => j.id) };
+    } catch (err) {
+      return { ok: false, reason: formatError(err) };
+    }
+  });
 }
