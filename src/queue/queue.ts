@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { getDb } from '../db/index.js';
 import { logger } from '../logger.js';
-import type { RunResult } from '../types/schema.js';
+import { randomDelay } from '../engine/timing.js';
+import type { DelayRange, RunResult } from '../types/schema.js';
 
 export type JobKind = 'flow' | 'search';
 export type JobStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
@@ -36,6 +37,8 @@ export interface QueueOptions {
   maxConcurrent: number;
   jobTimeoutMs: number;
   pollIntervalMs?: number;
+  /** Espaçamento entre o fim de um job e o início do próximo no mesmo perfil. */
+  jobDelayMs?: DelayRange;
 }
 
 /**
@@ -54,6 +57,9 @@ export interface QueueOptions {
  */
 export class JobQueue extends EventEmitter<JobQueueEvents> {
   private readonly running = new Map<string, { profileId: string; controller: AbortController; timer: NodeJS.Timeout }>();
+  /** Perfil → instante (epoch ms) até quando ele fica de fora do despacho. */
+  private readonly cooldowns = new Map<string, number>();
+  private readonly jobDelayRange: DelayRange;
   private draining = false;
   private stopped = true;
   private pollTimer: NodeJS.Timeout | null = null;
@@ -63,6 +69,7 @@ export class JobQueue extends EventEmitter<JobQueueEvents> {
     private readonly options: QueueOptions,
   ) {
     super();
+    this.jobDelayRange = options.jobDelayMs ?? [0, 0];
   }
 
   /* ───────── enfileiramento ───────── */
@@ -146,8 +153,22 @@ export class JobQueue extends EventEmitter<JobQueueEvents> {
     return Number(changed.changes) > 0;
   }
 
+  /**
+   * Espera até não haver mais trabalho em andamento.
+   *
+   * Enquanto a fila está ativamente processando (não parada), isso inclui
+   * jobs pendentes: sem o delay entre execuções, o intervalo entre um job
+   * terminar e o próximo do mesmo perfil começar era de um `setImmediate` —
+   * curto demais para o polling de 100ms aqui perceber `running` chegando a
+   * zero no meio do caminho. O delay entre execuções torna esse intervalo
+   * grande o bastante para importar, então passa a contar explicitamente.
+   *
+   * Chamado de dentro de `stop()` (fila já parada), o comportamento volta a
+   * ser só esperar o que está rodando: jobs pendentes não avançam mais
+   * porque o tick foi desligado, e esperá-los travaria para sempre.
+   */
   async waitForIdle(): Promise<void> {
-    while (this.running.size > 0) {
+    while (this.running.size > 0 || (!this.stopped && this.pendingCount() > 0)) {
       await new Promise((r) => setTimeout(r, 100));
     }
   }
@@ -181,11 +202,24 @@ export class JobQueue extends EventEmitter<JobQueueEvents> {
    * Próximo job cujo perfil está livre. O filtro por perfil ocupado vive na
    * própria consulta para que a decisão seja atômica em relação ao estado
    * persistido, e não dependa apenas do mapa em memória.
+   *
+   * Perfil ocupado tem dois motivos distintos: está rodando agora (RN-001,
+   * mutex de correção) ou terminou há pouco e ainda está no intervalo de
+   * espaçamento configurado (pacing deliberado, não é sobre correção).
    */
   private nextEligible(): Job | null {
+    const now = Date.now();
     const busy = [...this.running.values()].map((e) => e.profileId);
-    const placeholders = busy.map(() => '?').join(',');
-    const exclusion = busy.length > 0 ? `AND profile_id NOT IN (${placeholders})` : '';
+
+    const cooling: string[] = [];
+    for (const [profileId, until] of this.cooldowns) {
+      if (until <= now) this.cooldowns.delete(profileId);
+      else cooling.push(profileId);
+    }
+
+    const excluded = [...new Set([...busy, ...cooling])];
+    const placeholders = excluded.map(() => '?').join(',');
+    const exclusion = excluded.length > 0 ? `AND profile_id NOT IN (${placeholders})` : '';
 
     const row = getDb()
       .prepare(
@@ -194,7 +228,7 @@ export class JobQueue extends EventEmitter<JobQueueEvents> {
          ORDER BY priority DESC, created_at ASC
          LIMIT 1`,
       )
-      .get(...(busy as never[])) as Record<string, unknown> | undefined;
+      .get(...(excluded as never[])) as Record<string, unknown> | undefined;
 
     return row ? rowToJob(row) : null;
   }
@@ -233,6 +267,10 @@ export class JobQueue extends EventEmitter<JobQueueEvents> {
     } finally {
       clearTimeout(timer);
       this.running.delete(job.id);
+
+      const cooldownMs = randomDelay(this.jobDelayRange);
+      if (cooldownMs > 0) this.cooldowns.set(job.profileId, Date.now() + cooldownMs);
+
       if (!this.stopped) setImmediate(() => this.tick());
     }
   }

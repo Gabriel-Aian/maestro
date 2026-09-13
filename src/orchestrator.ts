@@ -39,6 +39,7 @@ export class Maestro {
     this.queue = new JobQueue((job, signal) => this.handle(job, signal), {
       maxConcurrent: config.maxConcurrentBrowsers,
       jobTimeoutMs: config.jobTimeoutMs,
+      jobDelayMs: config.jobDelayMs,
     });
   }
 

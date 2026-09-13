@@ -314,6 +314,14 @@ export const AppConfigSchema = z.object({
    * ficar pronto antes de interagir; isto é só para pacing deliberado.
    */
   defaultStepDelayMs: DelayRangeSchema.default([0, 0]),
+  /**
+   * Espaçamento entre o fim de um job e o início do próximo NO MESMO PERFIL,
+   * sorteado dentro da faixa (RN-008). Distinto do mutex de RN-001: aquele
+   * impede execução simultânea; este pausa entre execuções sucessivas da
+   * mesma conta, para não encadeá-las sem intervalo algum. `[0, 0]` (padrão)
+   * desliga o recurso.
+   */
+  jobDelayMs: DelayRangeSchema.default([0, 0]),
   retention: z
     .object({
       maxAgeDays: z.number().int().positive().default(30),

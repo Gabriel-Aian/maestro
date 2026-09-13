@@ -146,6 +146,93 @@ describe('JobQueue — invariantes de escalonamento', () => {
     expect(queue.activeCount).toBe(0);
   });
 
+  it('espaça jobs consecutivos do mesmo perfil pelo delay configurado', async () => {
+    const startedAt: number[] = [];
+
+    const queue = new JobQueue(
+      async (job: { id: string }) => {
+        startedAt.push(Date.now());
+        return fakeResult(job.id);
+      },
+      { maxConcurrent: 4, jobTimeoutMs: 10_000, pollIntervalMs: 10, jobDelayMs: [120, 120] },
+    );
+
+    queue.start();
+    queue.enqueue({ kind: 'flow', payload: {}, profileId: 'mesma-conta' });
+    queue.enqueue({ kind: 'flow', payload: {}, profileId: 'mesma-conta' });
+
+    await queue.waitForIdle();
+    await queue.stop();
+
+    expect(startedAt).toHaveLength(2);
+    expect(startedAt[1]! - startedAt[0]!).toBeGreaterThanOrEqual(110);
+  });
+
+  it('não atrasa jobs de perfis diferentes por causa do delay entre execuções', async () => {
+    const startedAt: number[] = [];
+
+    const queue = new JobQueue(
+      async (job: { id: string }) => {
+        startedAt.push(Date.now());
+        return fakeResult(job.id);
+      },
+      { maxConcurrent: 4, jobTimeoutMs: 10_000, pollIntervalMs: 10, jobDelayMs: [200, 200] },
+    );
+
+    queue.start();
+    queue.enqueue({ kind: 'flow', payload: {}, profileId: 'conta-a' });
+    queue.enqueue({ kind: 'flow', payload: {}, profileId: 'conta-b' });
+
+    await queue.waitForIdle();
+    await queue.stop();
+
+    expect(startedAt).toHaveLength(2);
+    expect(startedAt[1]! - startedAt[0]!).toBeLessThan(100);
+  });
+
+  it('sem jobDelayMs configurado, o próximo job do mesmo perfil roda sem espera (comportamento atual preservado)', async () => {
+    const startedAt: number[] = [];
+
+    const queue = new JobQueue(
+      async (job: { id: string }) => {
+        startedAt.push(Date.now());
+        return fakeResult(job.id);
+      },
+      { maxConcurrent: 4, jobTimeoutMs: 10_000, pollIntervalMs: 10 },
+    );
+
+    queue.start();
+    queue.enqueue({ kind: 'flow', payload: {}, profileId: 'mesma-conta' });
+    queue.enqueue({ kind: 'flow', payload: {}, profileId: 'mesma-conta' });
+
+    await queue.waitForIdle();
+    await queue.stop();
+
+    expect(startedAt).toHaveLength(2);
+    expect(startedAt[1]! - startedAt[0]!).toBeLessThan(100);
+  });
+
+  it('stop() não trava esperando pendentes que o próprio stop() impede de rodar', async () => {
+    const queue = new JobQueue(
+      async (job: { id: string }) => {
+        await new Promise((r) => setTimeout(r, 30));
+        return fakeResult(job.id);
+      },
+      { maxConcurrent: 1, jobTimeoutMs: 10_000, pollIntervalMs: 10, jobDelayMs: [500, 500] },
+    );
+
+    queue.start();
+    queue.enqueue({ kind: 'flow', payload: {}, profileId: 'mesma-conta' });
+    queue.enqueue({ kind: 'flow', payload: {}, profileId: 'mesma-conta' });
+
+    // Para assim que o primeiro job começa a rodar: o segundo fica pendente
+    // (mutex de perfil) e, com o tick desligado, jamais seria despachado.
+    await new Promise((r) => setTimeout(r, 15));
+    await queue.stop();
+
+    expect(queue.pendingCount()).toBe(1);
+  });
+
   it('kill switch cancela pendentes e limpa a fila (RF-054)', async () => {
 
     const queue = new JobQueue(
