@@ -28,19 +28,32 @@ function jobLabel(job: Job, flows: FlowIndexRow[]): string {
   return (job.payload as { label?: string }).label ?? 'pesquisas';
 }
 
-function toQueueJobView(job: Job, allProfiles: Profile[], flows: FlowIndexRow[]): QueueJobView {
+/**
+ * `job` aqui pode estar obsoleto: `JobQueue.finish()` só grava o desfecho no
+ * SQLite, nunca no objeto em memória que os eventos `finished`/`failed`
+ * carregam como primeiro argumento (ver `queue.ts`). Por isso `status`/`runId`/
+ * `error` aceitam override — quem estiver reagindo a um desses dois eventos
+ * deve sempre passar o dado vindo do segundo argumento do evento, não confiar
+ * no `job` em si.
+ */
+function toQueueJobView(
+  job: Job,
+  allProfiles: Profile[],
+  flows: FlowIndexRow[],
+  overrides?: { status?: Job['status']; runId?: string | null; error?: string | null },
+): QueueJobView {
   return {
     id: job.id,
     kind: job.kind,
     label: jobLabel(job, flows),
     profileId: job.profileId,
     profileName: profileName(job.profileId, allProfiles),
-    status: job.status,
+    status: overrides?.status ?? job.status,
     priority: job.priority,
     attempts: job.attempts,
     createdAt: job.createdAt,
-    runId: job.runId ?? null,
-    error: job.error ?? null,
+    runId: overrides && 'runId' in overrides ? (overrides.runId ?? null) : (job.runId ?? null),
+    error: overrides && 'error' in overrides ? (overrides.error ?? null) : (job.error ?? null),
   };
 }
 
@@ -105,8 +118,21 @@ export function registerIpcHandlers(): void {
   const asView = (job: Job) => toQueueJobView(job, profiles.list(), flowsIndex.list());
   maestro.queue.on('enqueued', (job) => broadcast({ type: 'enqueued', job: asView(job) }));
   maestro.queue.on('started', (job) => broadcast({ type: 'started', job: asView(job) }));
-  maestro.queue.on('finished', (job) => broadcast({ type: 'finished', job: asView(job) }));
-  maestro.queue.on('failed', (job) => broadcast({ type: 'failed', job: asView(job) }));
+
+  // `result` (RunResult) é a fonte de verdade do desfecho — `job` sozinho está
+  // congelado no estado de quando entrou em execução (ver toQueueJobView acima).
+  maestro.queue.on('finished', (job, result) => {
+    const status: Job['status'] = result.status === 'success' ? 'done' : 'failed';
+    const view = toQueueJobView(job, profiles.list(), flowsIndex.list(), { status, runId: result.runId, error: result.error ?? null });
+    broadcast({ type: 'finished', job: view });
+  });
+
+  // `message` é o erro real; o `job` recebido aqui nunca teve `.error` preenchido.
+  maestro.queue.on('failed', (job, message) => {
+    const view = toQueueJobView(job, profiles.list(), flowsIndex.list(), { status: 'failed', runId: null, error: message });
+    broadcast({ type: 'failed', job: view });
+  });
+
   maestro.queue.on('killed', () => broadcast({ type: 'killed' }));
 
   ipcMain.handle('maestro:getStatus', async () => {

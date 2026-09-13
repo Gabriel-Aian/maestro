@@ -154,7 +154,7 @@ export interface FlowStepResultView {
   error: string | null;
 }
 
-/** Resultado completo de uma execução — buscado sob demanda quando o job termina (evita inflar QueueEvent). */
+/** Resultado completo de uma execução — buscado sob demanda quando o job termina (evita inflar QueueEvent). Usado por fluxos e pesquisas. */
 export interface FlowRunDetail {
   runId: string;
   status: string;
@@ -167,3 +167,32 @@ export interface FlowRunDetail {
   artifactsDir: string | null;
   steps: FlowStepResultView[];
 }
+
+/* ─────────────────────────  PESQUISAS  ───────────────────────── */
+
+export interface SearchThemeView {
+  id: string;
+  name: string;
+  /** Do próprio arquivo — um tema desativado nunca roda, a GUI não sobrepõe isso. */
+  enabled: boolean;
+  /** Contagem já expandida (variáveis + repetições), não a quantidade de linhas no arquivo. */
+  queryCount: number;
+}
+
+export interface SearchFileView {
+  filePath: string;
+  themeCount: number;
+  totalQueries: number;
+  themes: SearchThemeView[];
+}
+
+export interface SearchValidationIssue {
+  path: string;
+  message: string;
+}
+
+export type LoadSearchFileResult =
+  | { ok: true; file: SearchFileView }
+  | { ok: false; filePath: string; reason: string; issues?: SearchValidationIssue[] };
+
+export type RunSearchResult = { ok: true; jobIds: string[] } | { ok: false; reason: string };

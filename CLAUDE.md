@@ -15,7 +15,7 @@ O `README.md` documenta o uso. O levantamento de requisitos completo (RF-001 a R
 
 ## Estado atual
 
-Fases 1 a 4, 6 e 7 do plano estão implementadas. 83 testes passando, typecheck limpo.
+Fases 1 a 4, 6 e 7 do plano estão implementadas. 85 testes passando, typecheck limpo.
 
 | Pronto | Não implementado |
 |---|---|
@@ -30,12 +30,17 @@ Fases 1 a 4, 6 e 7 do plano estão implementadas. 83 testes passando, typecheck 
 | Motor de pesquisas com expansão de variáveis | |
 | Agendamento (`node-cron` + Agendador de Tarefas do Windows) | |
 | CLI cobrindo todas as operações | |
-| Casca Electron — fundação + telas de fila, histórico, perfis/navegadores e fluxos | Telas de pesquisas, agendamentos, config |
+| Casca Electron — fundação + telas de fila, histórico, perfis/navegadores, fluxos e pesquisas | Telas de agendamentos, config |
 | | Instalador Windows (electron-builder) |
 
 **Nunca foi executado contra navegador real neste ambiente de desenvolvimento** — não havia Chromium disponível. A lógica pura está testada; o comportamento com Brave/Chrome/Edge foi validado manualmente pelo usuário no Windows dele. **O mesmo vale para `schtasks.exe`**: `schedule install-task`/`uninstall-task`/`task-status` nunca rodaram contra um Agendador de Tarefas real (este ambiente é Linux) — a sintaxe foi escrita com cuidado, mas confirme com `schedule install-task --dry-run` antes de instalar de verdade, e depois com `schedule task-status`.
 
-**A casca Electron, ao contrário do navegador e do `schtasks`, FOI testada de ponta a ponta neste ambiente** — via `Xvfb` (display virtual headless), tanto `electron-vite build` + `electron out/main/index.js --no-sandbox` quanto `electron-vite dev --noSandbox`. Em ambos os casos o renderer chamou o preload, que chamou o processo principal, que chamou o núcleo de verdade (`profiles.list()`, `detectBrowsers()`, etc.) e voltou com dado real. As telas (fila, histórico, perfis, o widget de login, fluxos) também foram verificadas visualmente assim: `webContents.capturePage()` tirando print de janelas invisíveis sob Xvfb, contra um banco semeado com perfis/fluxos/jobs/execuções falsos (incluindo um arquivo de fluxo de verdade em `flows/`, não só a entrada no índice) — inclusive viu a fila real processar jobs semeados, o fluxo de login real falhar corretamente ao tentar abrir um navegador que não existe aqui, e `maestro:flows:run` abortar de verdade por RN-015 (variável obrigatória sem valor) antes de tentar abrir navegador algum. `--no-sandbox`/`--noSandbox` é só para rodar sem privilégio de container aqui; não leve isso para o app real no Windows. **Transparência real de janela (`transparent: true` do widget) não foi confirmada visualmente** — Xvfb não tem compositor, e capturar só o conteúdo da própria janela não revela se o fundo do SO aparece por trás como deveria no Windows real; o que foi confirmado é que a janela abre do tamanho certo, sem moldura, e o conteúdo (cartão escuro semi-transparente, botões) renderiza como projetado.
+**A casca Electron, ao contrário do navegador e do `schtasks`, FOI testada de ponta a ponta neste ambiente** — via `Xvfb` (display virtual headless), tanto `electron-vite build` + `electron out/main/index.js --no-sandbox` quanto `electron-vite dev --noSandbox`. Em ambos os casos o renderer chamou o preload, que chamou o processo principal, que chamou o núcleo de verdade (`profiles.list()`, `detectBrowsers()`, etc.) e voltou com dado real. As telas (fila, histórico, perfis, o widget de login, fluxos, pesquisas) também foram verificadas visualmente assim: `webContents.capturePage()` tirando print de janelas invisíveis sob Xvfb, contra um banco semeado com perfis/fluxos/jobs/execuções falsos (incluindo um arquivo de fluxo de verdade em `flows/`, não só a entrada no índice) — inclusive viu a fila real processar jobs semeados, o fluxo de login real falhar corretamente ao tentar abrir um navegador que não existe aqui, `maestro:flows:run` abortar de verdade por RN-015 (variável obrigatória sem valor) antes de tentar abrir navegador algum, e (na tela de Pesquisas) um job de busca falhar de verdade por navegador não detectado, com a mensagem de erro real chegando até a tabela de resultado. `--no-sandbox`/`--noSandbox` é só para rodar sem privilégio de container aqui; não leve isso para o app real no Windows. **Transparência real de janela (`transparent: true` do widget) não foi confirmada visualmente** — Xvfb não tem compositor, e capturar só o conteúdo da própria janela não revela se o fundo do SO aparece por trás como deveria no Windows real; o que foi confirmado é que a janela abre do tamanho certo, sem moldura, e o conteúdo (cartão escuro semi-transparente, botões) renderiza como projetado.
+
+**Essa verificação por Xvfb já encontrou e corrigiu três bugs reais, não hipotéticos**, todos ao construir a tela de Pesquisas — vale a pena continuar usando o mesmo método para as próximas telas em vez de confiar só em typecheck/testes:
+1. `Maestro.enqueueSearches` enfileirava jobs de perfis anteriores antes de validar os seguintes — um perfil inválido no meio do lote deixava jobs de perfis válidos já rodando (corrigido em `src/orchestrator.ts`, ver regra abaixo).
+2. Uma tela que só assina eventos de fila depois de descobrir o `jobId` (dentro de um `useEffect([jobId])`, ou um estado só populado após o `await` da chamada que criou o job) pode perder para sempre a conclusão de um job que falha na hora — o evento chega antes da assinatura existir (corrigido com `electron/renderer/src/jobEvents.ts`, ver regra abaixo).
+3. Os eventos `finished`/`failed` da fila (`electron/main/ipc.ts`) repassavam o objeto `Job` em memória, que nunca é atualizado com o desfecho real — `status`/`runId`/`error` ficavam com o valor de quando o job entrou em execução. A mensagem de erro de verdade só existe no segundo argumento do evento (ver regra abaixo).
 
 ## Arquitetura
 
@@ -73,12 +78,15 @@ electron/                 # casca Electron — NÃO faz parte do pacote "maestro
 │   ├── profilesIpc.ts     # perfis/navegadores/login: mesmo padrão, chamando openProfilePlain (sem automação)
 │   ├── loginWidget.ts     # janela flutuante separada que substitui o "pressione Enter" da CLI no login manual
 │   ├── flowsIpc.ts        # fluxos: listar/mostrar passos/rodar via maestro.enqueueFlow — resultado buscado por runId, sem widget
+│   ├── searchIpc.ts       # pesquisas: só aponta para arquivo já existente (getLast/pickFile/reload/openFolder) + roda via maestro.enqueueSearches
+│   ├── prefs.ts           # preferências só da GUI (ex.: último arquivo de pesquisas), separadas do AppConfig do núcleo
 │   └── index.ts           # janela principal + ciclo de vida do app; importa src/index.ts DIRETO (fonte, não dist/)
 ├── preload/index.ts      # contextBridge — única coisa exposta ao renderer
 └── renderer/src/
     ├── App.tsx            # shell: sidebar de navegação + tela ativa
     ├── LoginWidget.tsx    # UI da janela flutuante — roteada por hash (#/login-widget), não por um entry point separado
-    ├── screens/           # uma tela por arquivo (QueueScreen, HistoryScreen, ProfilesScreen, FlowsScreen, ...)
+    ├── jobEvents.ts       # buffer de conclusões de job + hook useJobEvents — ver regra abaixo antes de mexer
+    ├── screens/           # uma tela por arquivo (QueueScreen, HistoryScreen, ProfilesScreen, FlowsScreen, SearchesScreen, ...)
     └── styles.css         # design system (cores, tabela, badges, botões, widget) — sem framework de UI
 ```
 
@@ -114,6 +122,16 @@ electron/                 # casca Electron — NÃO faz parte do pacote "maestro
 
 **As telas não fazem polling — reagem aos eventos da fila.** `electron/main/ipc.ts` liga `maestro.queue.on(...)` a um broadcast (`QUEUE_EVENT_CHANNEL`) para todas as janelas; o renderer assina via `window.maestro.onQueueEvent(...)` e simplesmente reconsulta a lista inteira a cada evento (`QueueScreen`, `HistoryScreen`). É uma escolha deliberada pela simplicidade: reconsultar do SQLite local é barato e evita bugs de estado dessincronizado — não troque por patch incremental de estado sem um motivo concreto.
 
+**Os eventos `finished`/`failed` de `JobQueue` (`src/queue/queue.ts`) carregam o objeto `Job` OBSOLETO como primeiro argumento.** `this.finish(jobId, status, runId, error)` só grava o desfecho no SQLite — nunca muta o `Job` em memória que foi passado para `this.emit(...)`. O dado de verdade está no segundo argumento: `RunResult` inteiro em `finished`, a mensagem de erro (`string`) em `failed`. `electron/main/ipc.ts` já trata isso: `toQueueJobView(job, ..., overrides)` aceita `{ status, runId, error }` e os listeners de `finished`/`failed` sempre passam esse override construído a partir do segundo argumento do evento — nunca do `job` sozinho. Qualquer novo listener desses dois eventos (aqui ou em código futuro) precisa do mesmo cuidado; foi um bug real (a coluna de erro da tela de Pesquisas ficava em branco mesmo com o job corretamente marcado como "falhou").
+
+**Buffer de conclusão de job no renderer (`electron/renderer/src/jobEvents.ts`) — não troque por "assinar só depois de saber o jobId".** Um job pode falhar sincronamente (ex.: `resolveExecutable` lançando antes de qualquer I/O) e seu evento de fila pode chegar ANTES da chamada que o criou (`runFlow`/`runSearch`) sequer retornar no renderer. `useJobEvents(...)` assina desde o mount (efeito sem dependências) e guarda toda conclusão num `Map` module-level; `consumeJobCompletion(jobId)` é para ser chamado logo ao descobrir um `jobId` novo, para pegar uma conclusão que já tenha chegado antes. Usado por `FlowsScreen` e `SearchesScreen`; qualquer tela nova que dispare um job pela fila e precise saber quando ele termina deve reusar esse módulo, não reinventar um `useEffect([jobId])` que só assina depois — foi exatamente esse padrão que prendia a tela em "Executando…"/"em execução" para sempre num job que falhasse rápido demais.
+
+**`Maestro.enqueueSearches` resolve TODOS os perfis do lote antes de enfileirar qualquer job — mesmo princípio de RN-015 aplicado a lote.** Pesquisas são agrupadas por perfil e um job é criado por grupo; se a validação (`requireProfile`, que barra `session_expired` por RN-004) acontecesse dentro do mesmo laço que enfileira, um perfil inválido no meio do `Map` deixava os jobs de perfis anteriores já enfileirados e rodando, com o chamador vendo só uma exceção sem saber que algo tinha sido efetivamente disparado. A correção resolve todos os perfis num passo anterior e só então enfileira — tudo ou nada. Não volte a interlear validação com enfileiramento aqui. Coberto por `test/orchestrator.test.ts`.
+
+**Preferências só da GUI (`electron/main/prefs.ts`) são um arquivo à parte (`gui-prefs.json`) do `AppConfig` do núcleo.** Coisas que só fazem sentido para a casca Electron — hoje, o último arquivo de pesquisas selecionado — não pertencem ao `AppConfig` (que a CLI também lê/escreve e não tem esse conceito). Se uma tela futura precisar lembrar de alguma escolha do usuário entre sessões, adicione o campo em `GuiPrefs`, não sobrecarregue o `AppConfig`.
+
+**A tela de Pesquisas nunca edita o conteúdo do arquivo de pesquisas — só aponta para um arquivo já existente no disco.** Decisão explícita do usuário: `searchIpc.ts` expõe `pickFile` (diálogo nativo, só seleciona), `reload` (relê o mesmo caminho) e `openFolder` (`shell.showItemInFolder`, atalho para o usuário editar com o editor dele). `SearchesScreen` recarrega sozinha no evento `focus` da janela, para que "editar por fora e voltar" funcione sem precisar clicar em "Recarregar". Não adicione um editor de JSON embutido aqui — se isso for pedido no futuro, é uma mudança de escopo explícita, não uma evolução natural desta tela.
+
 ## Decisões técnicas e seus porquês
 
 **`node:sqlite` em vez de `better-sqlite3`.** O nativo exige recompilar para a ABI do Electron a cada atualização, que é a maior dor no empacotamento. A camada está isolada em `src/db/index.ts` — trocar é alterar só esse arquivo. O módulo ainda é experimental no Node 22; o aviso é filtrado no topo de `cli.ts`.
@@ -132,7 +150,7 @@ electron/                 # casca Electron — NÃO faz parte do pacote "maestro
 npm install
 npm run build        # tsc
 npm run typecheck    # tsc --noEmit
-npm test             # vitest, 83 testes
+npm test             # vitest, 85 testes
 npm run dev -- <cmd> # roda a CLI direto do TS
 
 node dist/cli.js doctor
@@ -164,6 +182,7 @@ No Windows com PowerShell, se `npm` for bloqueado por política de execução, u
 - `test/searchFile.test.ts` — validação, herança, expansão.
 - `test/timing.test.ts` — precedência de delay (passo > fluxo > global) e conversão de intervalos gravados em passos reais.
 - `test/scheduler.test.ts` — `isDue`/idempotência do tick/isolamento de falha; construção do comando `schtasks` sem executá-lo.
+- `test/orchestrator.test.ts` — atomicidade por perfil de `enqueueSearches`: nenhum job é enfileirado se qualquer perfil do lote for inválido, mesmo com outros válidos.
 
 `vitest.config.ts` cria um `MAESTRO_HOME` descartável: os testes nunca tocam o `%APPDATA%` real.
 
@@ -172,7 +191,7 @@ No Windows com PowerShell, se `npm` for bloqueado por política de execução, u
 1. **Validar o gravador em sites reais.** É o maior risco aberto. Peça ao usuário o `flow show` de fluxos gravados em sites de verdade e calibre as heurísticas de `injected.ts` em cima dos casos concretos — especialmente `looksGenerated()`, que pode estar descartando identificadores válidos ou aceitando gerados.
 2. **Validar o agendamento no Windows real.** Segundo maior risco aberto, mesma natureza do item 1: `schedule install-task`/`tick` nunca rodaram contra um Agendador de Tarefas de verdade. Peça ao usuário para instalar com `--dry-run` primeiro, depois de verdade, e conferir com `schedule task-status` e `schedule list` (próxima janela calculada) se bate com o Agendador de Tarefas nativo do Windows.
 3. **Editor de fluxos (fase 5, RF-031 a RF-039).** Remover passos, reordenar, parametrizar valores em variáveis, inserir esperas e asserções. Hoje só dá para editar o JSON à mão.
-4. **Telas da casca Electron, na ordem combinada com o usuário: ~~fila/histórico~~ ~~perfis/navegadores~~ ~~fluxos~~ (prontas) → pesquisas → agendamentos → configurações → empacotamento (electron-builder, instalador Windows).** Padrão a repetir para cada uma: `electron/shared/ipc.ts` (contrato) → handler em `electron/main/*Ipc.ts` (busca do núcleo real, sem caminho paralelo) → método no preload → tela em `electron/renderer/src/screens/`. Pesquisas é a próxima: reaproveita `expandSearches`/`loadSearchFile` do núcleo, mas o arquivo de pesquisas hoje só existe como JSON escrito à mão — decidir se a GUI edita esse arquivo diretamente ou só valida/roda um caminho já existente no disco.
+4. **Telas da casca Electron, na ordem combinada com o usuário: ~~fila/histórico~~ ~~perfis/navegadores~~ ~~fluxos~~ ~~pesquisas~~ (prontas) → agendamentos → configurações → empacotamento (electron-builder, instalador Windows).** Padrão a repetir para cada uma: `electron/shared/ipc.ts` (contrato) → handler em `electron/main/*Ipc.ts` (busca do núcleo real, sem caminho paralelo) → método no preload → tela em `electron/renderer/src/screens/`. Agendamentos é a próxima: reaproveita `schedules` (`src/db/index.ts`) e `Maestro.enqueueSchedule()`; decisões em aberto incluem como editar a expressão cron na UI (campo livre vs. construtor visual) e como expor `schedule install-task`/`task-status` (que mexem no Agendador de Tarefas do Windows) sem dar a impressão de que rodam de verdade neste ambiente Linux.
 5. **Retenção e métricas na UI (RF-071 a RF-077).** A lógica existe (`Maestro.cleanupArtifacts()`, `runs.stats()`), falta superfície.
 
 ## Pontos em aberto com o usuário

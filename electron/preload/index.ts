@@ -10,12 +10,14 @@ import {
   type FlowRunDetail,
   type HistoryFilter,
   type HistoryRunView,
+  type LoadSearchFileResult,
   type LoginCheckResult,
   type ProfileView,
   type ProfilesEvent,
   type QueueEvent,
   type QueueJobView,
   type RunFlowResult,
+  type RunSearchResult,
   type StatusView,
 } from '../shared/ipc.js';
 
@@ -61,6 +63,13 @@ const api = {
   runFlow: (flowId: string, profileId: string, variables: Record<string, string>, headed: boolean): Promise<RunFlowResult> =>
     ipcRenderer.invoke('maestro:flows:run', { flowId, profileId, variables, headed }),
   getRun: (runId: string): Promise<FlowRunDetail | null> => ipcRenderer.invoke('maestro:runs:get', runId),
+
+  getLastSearchFile: (): Promise<LoadSearchFileResult | null> => ipcRenderer.invoke('maestro:search:getLast'),
+  pickSearchFile: (): Promise<LoadSearchFileResult | null> => ipcRenderer.invoke('maestro:search:pickFile'),
+  reloadSearchFile: (filePath: string): Promise<LoadSearchFileResult> => ipcRenderer.invoke('maestro:search:reload', filePath),
+  openSearchFileFolder: (filePath: string): Promise<void> => ipcRenderer.invoke('maestro:search:openFolder', filePath),
+  runSearch: (filePath: string, themeIds: string[]): Promise<RunSearchResult> =>
+    ipcRenderer.invoke('maestro:search:run', { filePath, themeIds }),
 };
 
 contextBridge.exposeInMainWorld('maestro', api);

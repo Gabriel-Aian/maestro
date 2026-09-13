@@ -5,6 +5,7 @@ import { initMaestro, shutdownMaestro } from './maestro.js';
 import { registerIpcHandlers } from './ipc.js';
 import { registerProfileIpcHandlers } from './profilesIpc.js';
 import { registerFlowIpcHandlers } from './flowsIpc.js';
+import { registerSearchIpcHandlers } from './searchIpc.js';
 
 const dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -50,6 +51,7 @@ app.whenReady().then(async () => {
   registerIpcHandlers();
   registerProfileIpcHandlers();
   registerFlowIpcHandlers();
+  registerSearchIpcHandlers();
 
   createWindow();
 

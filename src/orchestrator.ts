@@ -121,9 +121,16 @@ export class Maestro {
       byProfile.set(search.profile, list);
     }
 
+    // Resolve TODOS os perfis antes de enfileirar qualquer job — mesmo
+    // princípio de RN-015: um perfil inválido no meio do lote não pode deixar
+    // os anteriores já enfileirados (efeito colateral parcial e silencioso).
+    const resolvedProfiles = new Map(
+      [...byProfile.keys()].map((profileName) => [profileName, this.requireProfile(profileName)] as const),
+    );
+
     const jobs: Job[] = [];
     for (const [profileName, group] of byProfile) {
-      const profile = this.requireProfile(profileName);
+      const profile = resolvedProfiles.get(profileName)!;
       jobs.push(
         this.queue.enqueue({
           kind: 'search',

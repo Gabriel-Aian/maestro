@@ -3,14 +3,16 @@ import { QueueScreen } from './screens/QueueScreen.js';
 import { HistoryScreen } from './screens/HistoryScreen.js';
 import { ProfilesScreen } from './screens/ProfilesScreen.js';
 import { FlowsScreen } from './screens/FlowsScreen.js';
+import { SearchesScreen } from './screens/SearchesScreen.js';
 
-type Screen = 'queue' | 'history' | 'profiles' | 'flows';
+type Screen = 'queue' | 'history' | 'profiles' | 'flows' | 'searches';
 
 const NAV: Array<{ id: Screen; label: string }> = [
   { id: 'queue', label: 'Fila' },
   { id: 'history', label: 'Histórico' },
   { id: 'profiles', label: 'Perfis' },
   { id: 'flows', label: 'Fluxos' },
+  { id: 'searches', label: 'Pesquisas' },
 ];
 
 export function App() {
@@ -41,6 +43,7 @@ export function App() {
         {screen === 'history' && <HistoryScreen />}
         {screen === 'profiles' && <ProfilesScreen />}
         {screen === 'flows' && <FlowsScreen />}
+        {screen === 'searches' && <SearchesScreen />}
       </main>
     </div>
   );

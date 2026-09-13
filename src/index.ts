@@ -5,7 +5,13 @@ export { RecordingSession, materializeTimingSteps, DEFAULT_TIMING_MIN_MS, DEFAUL
 export { replayFlow, resolveVariables } from './engine/replay.js';
 export { describeCandidate } from './engine/selectors.js';
 export { runSearchBatch } from './search/runner.js';
-export { expandSearches, loadSearchFile, validateSearchFile } from './search/searchFile.js';
+export {
+  expandSearches,
+  loadSearchFile,
+  validateSearchFile,
+  SearchFileInvalidError,
+  type ValidationIssue,
+} from './search/searchFile.js';
 export { saveFlow, loadFlow, listFlowVersions, restoreFlowVersion } from './store/flowStore.js';
 export { detectBrowsers, validateBrowserPath } from './browsers/detect.js';
 export { BrowserPool, launchProfile, isProfileLocked, openProfilePlain } from './browsers/launcher.js';

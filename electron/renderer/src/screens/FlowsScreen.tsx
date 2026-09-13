@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { FlowDetailView, FlowListItem, FlowRunDetail, ProfileView, QueueEvent } from '../../../shared/ipc.js';
+import type { FlowDetailView, FlowListItem, FlowRunDetail, ProfileView } from '../../../shared/ipc.js';
 import { StatusBadge } from '../components/StatusBadge.js';
+import { consumeJobCompletion, useJobEvents, type JobCompletion } from '../jobEvents.js';
 
 function formatDuration(ms: number | null): string {
   if (ms === null) return '—';
@@ -147,33 +148,38 @@ function FlowRunPanel({ flowId, profiles, onRan }: { flowId: string; profiles: P
     if (!profileId && profiles.length > 0) setProfileId(profiles[0]!.id);
   }, [profiles, profileId]);
 
-  useEffect(() => {
-    if (!jobId) return;
-    return window.maestro.onQueueEvent((event: QueueEvent) => {
-      if (event.type !== 'finished' && event.type !== 'failed') return;
-      if (event.job.id !== jobId) return;
+  function handleCompletion(completion: JobCompletion): void {
+    setRunning(false);
+    onRan();
+    if (completion.job.runId) {
+      window.maestro.getRun(completion.job.runId).then(setResult);
+    } else {
+      setRunError(completion.job.error ?? 'Falhou antes de produzir um resultado.');
+    }
+  }
 
-      setRunning(false);
-      onRan();
-      if (event.job.runId) {
-        window.maestro.getRun(event.job.runId).then(setResult);
-      } else {
-        setRunError(event.job.error ?? 'Falhou antes de produzir um resultado.');
-      }
-    });
-  }, [jobId, onRan]);
+  // Assinatura ativa desde o mount, não só depois de setJobId — um job que
+  // falha na hora (ex.: navegador não detectado) pode terminar e disparar
+  // seu evento antes mesmo de `runFlow` devolver o jobId para este
+  // componente. Sem isso a tela ficava presa em "Executando…" para sempre
+  // nesse caso (visto ao vivo, não hipotético — ver jobEvents.ts).
+  useJobEvents((completedJobId, completion) => {
+    if (completedJobId === jobId) handleCompletion(completion);
+  });
 
   async function run(): Promise<void> {
     setRunning(true);
     setRunError(null);
     setResult(null);
     const r = await window.maestro.runFlow(flowId, profileId, vars, headed);
-    if (r.ok) {
-      setJobId(r.jobId);
-    } else {
+    if (!r.ok) {
       setRunning(false);
       setRunError(r.reason);
+      return;
     }
+    setJobId(r.jobId);
+    const already = consumeJobCompletion(r.jobId);
+    if (already) handleCompletion(already);
   }
 
   if (!detail) {
