@@ -1,49 +1,18 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  detectBrowsers,
-  loadConfig,
-  paths,
-  profiles,
-  flowsIndex,
-  runs,
-  schedules,
-  getDb,
-} from '../../src/index.js';
+import { initMaestro, shutdownMaestro } from './maestro.js';
+import { registerIpcHandlers } from './ipc.js';
 
 const dirname = fileURLToPath(new URL('.', import.meta.url));
 
-/**
- * Prova de vida do processo principal: usa exatamente as mesmas funções que
- * `maestro doctor` na CLI, não um caminho paralelo. Frente 1 é só isso — abrir
- * a janela e provar que ela fala com o núcleo de verdade.
- */
-async function getStatus() {
-  const config = loadConfig();
-  const detected = await detectBrowsers();
-  const allProfiles = profiles.list();
-  const pending = getDb().prepare(`SELECT COUNT(*) AS n FROM jobs WHERE status = 'pending'`).get() as { n: number };
-
-  return {
-    node: process.version,
-    electron: process.versions.electron,
-    platform: process.platform,
-    dataDir: paths.root,
-    browsersDetected: detected.map((b) => b.id),
-    profiles: { total: allProfiles.length, authenticated: allProfiles.filter((p) => p.status === 'authenticated').length },
-    flows: flowsIndex.list().length,
-    schedules: schedules.list().length,
-    pendingJobs: Number(pending.n),
-    recentRuns: runs.list({ limit: 5 }).length,
-    defaultHeadless: config.defaultHeadless,
-  };
-}
-
 function createWindow(): void {
   const window = new BrowserWindow({
-    width: 1100,
-    height: 720,
+    width: 1200,
+    height: 780,
+    minWidth: 860,
+    minHeight: 560,
+    backgroundColor: '#f5f5f4',
     webPreferences: {
       // Nome real do arquivo gerado por `electron-vite build`/`dev` (conferido
       // no out/) — preload é forçado a CJS (ver electron.vite.config.ts).
@@ -71,8 +40,12 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
-  ipcMain.handle('maestro:getStatus', () => getStatus());
+app.whenReady().then(async () => {
+  // Uma só instância do núcleo para a vida inteira do app — ver
+  // electron/main/maestro.ts para o porquê de isso não ser "por comando"
+  // como na CLI.
+  await initMaestro();
+  registerIpcHandlers();
 
   createWindow();
 
@@ -83,4 +56,13 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+// Deixa a fila terminar os jobs em andamento e fecha os navegadores antes de
+// sair — sem isso, fechar a janela abandonaria contextos de perfil abertos.
+app.on('before-quit', (event) => {
+  event.preventDefault();
+  shutdownMaestro()
+    .catch((err: unknown) => console.error('Falha ao desligar o núcleo:', err))
+    .finally(() => app.exit());
 });

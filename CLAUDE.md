@@ -30,12 +30,12 @@ Fases 1 a 4, 6 e 7 do plano estão implementadas. 83 testes passando, typecheck 
 | Motor de pesquisas com expansão de variáveis | |
 | Agendamento (`node-cron` + Agendador de Tarefas do Windows) | |
 | CLI cobrindo todas as operações | |
-| Casca Electron — fundação (janela + IPC até o núcleo real) | Telas da GUI (fila/histórico, perfis, fluxos, pesquisas, agendamentos, config) |
+| Casca Electron — fundação + telas de fila e histórico | Telas de perfis, fluxos, pesquisas, agendamentos, config |
 | | Instalador Windows (electron-builder) |
 
 **Nunca foi executado contra navegador real neste ambiente de desenvolvimento** — não havia Chromium disponível. A lógica pura está testada; o comportamento com Brave/Chrome/Edge foi validado manualmente pelo usuário no Windows dele. **O mesmo vale para `schtasks.exe`**: `schedule install-task`/`uninstall-task`/`task-status` nunca rodaram contra um Agendador de Tarefas real (este ambiente é Linux) — a sintaxe foi escrita com cuidado, mas confirme com `schedule install-task --dry-run` antes de instalar de verdade, e depois com `schedule task-status`.
 
-**A casca Electron, ao contrário do navegador e do `schtasks`, FOI testada de ponta a ponta neste ambiente** — via `Xvfb` (display virtual headless), tanto `electron-vite build` + `electron out/main/index.js --no-sandbox` quanto `electron-vite dev --noSandbox`. Em ambos os casos o renderer chamou o preload, que chamou o processo principal, que chamou o núcleo de verdade (`profiles.list()`, `detectBrowsers()`, etc.) e voltou com dado real. `--no-sandbox`/`--noSandbox` é só para rodar sem privilégio de container aqui; não leve isso para o app real no Windows.
+**A casca Electron, ao contrário do navegador e do `schtasks`, FOI testada de ponta a ponta neste ambiente** — via `Xvfb` (display virtual headless), tanto `electron-vite build` + `electron out/main/index.js --no-sandbox` quanto `electron-vite dev --noSandbox`. Em ambos os casos o renderer chamou o preload, que chamou o processo principal, que chamou o núcleo de verdade (`profiles.list()`, `detectBrowsers()`, etc.) e voltou com dado real. As telas de fila e histórico também foram verificadas visualmente assim: `webContents.capturePage()` tirando print de uma janela invisível sob Xvfb, contra um banco semeado com perfis/fluxos/jobs/execuções falsos — inclusive viu a fila real processar jobs semeados (e falhar ao tentar abrir um navegador que não existe aqui, como esperado). `--no-sandbox`/`--noSandbox` é só para rodar sem privilégio de container aqui; não leve isso para o app real no Windows.
 
 ## Arquitetura
 
@@ -66,9 +66,16 @@ src/
 └── index.ts              # API pública sem UI (RNF-020) — é o que a casca Electron consome
 
 electron/                 # casca Electron — NÃO faz parte do pacote "maestro-core"
-├── main/index.ts         # processo principal: importa src/index.ts DIRETO (fonte, não dist/)
+├── shared/ipc.ts         # contrato IPC (tipos + nomes de canal) — main e renderer importam daqui, nunca um do outro
+├── main/
+│   ├── maestro.ts        # instância ÚNICA de Maestro para a vida do app (não "por comando" como a CLI)
+│   ├── ipc.ts             # ipcMain.handle(...) + repassa eventos da fila (enqueued/started/finished/failed/killed) para as janelas
+│   └── index.ts           # janela + ciclo de vida do app; importa src/index.ts DIRETO (fonte, não dist/)
 ├── preload/index.ts      # contextBridge — única coisa exposta ao renderer
-└── renderer/              # app React (Vite)
+└── renderer/src/
+    ├── App.tsx            # shell: sidebar de navegação + tela ativa
+    ├── screens/           # uma tela por arquivo (QueueScreen, HistoryScreen, ...)
+    └── styles.css         # design system (cores, tabela, badges, botões) — sem framework de UI
 ```
 
 ## Regras que o código assume — não quebre
@@ -94,6 +101,10 @@ electron/                 # casca Electron — NÃO faz parte do pacote "maestro
 **O preload do Electron tem que compilar para CJS, nunca ESM — mesmo o pacote sendo `"type": "module"`.** Com `contextIsolation: true` + `sandbox: true` (a combinação certa para expor `contextBridge` com segurança — não enfraqueça isso para "resolver" um erro de preload), o preload roda num contexto que não aceita `import`/`export` de verdade. Testado ao vivo neste ambiente via Xvfb: com saída ESM (`.mjs`, o default do electron-vite quando detecta `"type": "module"`) a janela abre mas o preload falha silenciosamente (`SyntaxError: Cannot use import statement outside a module`) e `window.maestro` fica `undefined` — sem crash, sem aviso óbvio, só a UI quebrada. `electron.vite.config.ts` força `rollupOptions.output.format: 'cjs'` no bloco `preload`, e a saída vira `index.cjs` (não `index.js` — precisa da extensão `.cjs` porque o pacote é `"type": "module"`). Se trocar esse arquivo de posição ou nome, ajuste a referência hardcoded em `electron/main/index.ts`.
 
 **`package.json` precisa do campo `"main"` apontando para `out/main/index.js`.** É só o que `electron-vite dev`/`preview` usam para saber o que rodar — não interfere no consumo do pacote como biblioteca (`exports` continua valendo para isso) nem no `bin` da CLI.
+
+**Existe UMA instância de `Maestro` para a vida inteira do processo principal (`electron/main/maestro.ts`), não uma por ação como na CLI.** A fila precisa continuar processando com a janela aberta; `initMaestro()` roda em `app.whenReady()`, `shutdownMaestro()` em `before-quit` (com `event.preventDefault()` até o desligamento terminar, para não abandonar contexto de perfil aberto). Qualquer tela nova pega o `Maestro` via `getMaestro()`, nunca cria o seu próprio.
+
+**As telas não fazem polling — reagem aos eventos da fila.** `electron/main/ipc.ts` liga `maestro.queue.on(...)` a um broadcast (`QUEUE_EVENT_CHANNEL`) para todas as janelas; o renderer assina via `window.maestro.onQueueEvent(...)` e simplesmente reconsulta a lista inteira a cada evento (`QueueScreen`, `HistoryScreen`). É uma escolha deliberada pela simplicidade: reconsultar do SQLite local é barato e evita bugs de estado dessincronizado — não troque por patch incremental de estado sem um motivo concreto.
 
 ## Decisões técnicas e seus porquês
 
@@ -153,7 +164,7 @@ No Windows com PowerShell, se `npm` for bloqueado por política de execução, u
 1. **Validar o gravador em sites reais.** É o maior risco aberto. Peça ao usuário o `flow show` de fluxos gravados em sites de verdade e calibre as heurísticas de `injected.ts` em cima dos casos concretos — especialmente `looksGenerated()`, que pode estar descartando identificadores válidos ou aceitando gerados.
 2. **Validar o agendamento no Windows real.** Segundo maior risco aberto, mesma natureza do item 1: `schedule install-task`/`tick` nunca rodaram contra um Agendador de Tarefas de verdade. Peça ao usuário para instalar com `--dry-run` primeiro, depois de verdade, e conferir com `schedule task-status` e `schedule list` (próxima janela calculada) se bate com o Agendador de Tarefas nativo do Windows.
 3. **Editor de fluxos (fase 5, RF-031 a RF-039).** Remover passos, reordenar, parametrizar valores em variáveis, inserir esperas e asserções. Hoje só dá para editar o JSON à mão.
-4. **Telas da casca Electron, na ordem combinada com o usuário: fila/histórico → perfis/navegadores → fluxos (listar/rodar, não o editor — item 3, à parte) → pesquisas → agendamentos → configurações → empacotamento (electron-builder, instalador Windows).** A fundação (janela + IPC até o núcleo real, `electron/`) já está pronta e testada via Xvfb; falta só construir cada tela em cima do `window.maestro` exposto pelo preload, seguindo o mesmo padrão do handler `getStatus` em `electron/main/index.ts`.
+4. **Telas da casca Electron, na ordem combinada com o usuário: ~~fila/histórico~~ (prontas) → perfis/navegadores → fluxos (listar/rodar, não o editor — item 3, à parte) → pesquisas → agendamentos → configurações → empacotamento (electron-builder, instalador Windows).** Fila e histórico seguem o padrão a repetir: `electron/shared/ipc.ts` (contrato) → handler em `electron/main/ipc.ts` (busca do núcleo real, sem caminho paralelo) → método no preload → tela em `electron/renderer/src/screens/`. Perfis/navegadores é a próxima: precisa de ações que hoje só existem como fluxo interativo de CLI (`profile login` abre navegador sem automação e espera Enter no terminal — pensar em como isso vira UI antes de começar).
 5. **Retenção e métricas na UI (RF-071 a RF-077).** A lógica existe (`Maestro.cleanupArtifacts()`, `runs.stats()`), falta superfície.
 
 ## Pontos em aberto com o usuário
