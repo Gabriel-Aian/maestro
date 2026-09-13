@@ -157,6 +157,29 @@ describe('windowsTask — construção de comando (sem executar nada)', () => {
     expect(command).not.toContain(process.execPath);
   });
 
+  /**
+   * A GUI empacotada (electron-builder) não pode contar com `node` na PATH
+   * do usuário final — roda o próprio executável do Maestro com
+   * `ELECTRON_RUN_AS_NODE=1` (confirmado ao vivo: ver comentário de
+   * `buildTickCommand`). `schtasks /tr` só aceita uma linha de comando, sem
+   * campo de ambiente — por isso o `set VAR=1&&` embrulhado num `cmd.exe /c`.
+   */
+  it('embrulha em cmd.exe /c "set VAR=1&&..." quando env é informado', () => {
+    const command = buildTickCommand({
+      nodePath: 'C:\\Program Files\\Maestro\\Maestro.exe',
+      cliPath: 'C:\\Program Files\\Maestro\\dist\\cli.js',
+      env: { ELECTRON_RUN_AS_NODE: '1' },
+    });
+    expect(command).toBe(
+      'cmd.exe /c "set ELECTRON_RUN_AS_NODE=1&&"C:\\Program Files\\Maestro\\Maestro.exe" "C:\\Program Files\\Maestro\\dist\\cli.js" schedule tick"',
+    );
+  });
+
+  it('sem env, não embrulha em cmd.exe — mesmo comportamento de antes', () => {
+    const command = buildTickCommand({ nodePath: 'node', cliPath: 'cli.js', env: {} });
+    expect(command).toBe('"node" "cli.js" schedule tick');
+  });
+
   it('recusa instalar de verdade fora do Windows (R-01)', async () => {
     await expect(installWindowsTask({ intervalMinutes: 5 })).rejects.toThrow(/Windows/);
   });

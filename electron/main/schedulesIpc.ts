@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain } from 'electron';
+import { BrowserWindow, app, dialog, ipcMain } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -80,21 +80,41 @@ function toScheduleView(s: Schedule, allProfiles: Profile[], flows: FlowIndexRow
   };
 }
 
+const dirname = fileURLToPath(new URL('.', import.meta.url));
+
 /**
  * `buildInstallArgs`/`buildTickCommand` só acertam `cliPath` sozinhos quando
  * chamados PELA PRÓPRIA CLI (`process.argv[1]` sendo `dist/cli.js`) — dentro
  * do processo principal do Electron, `process.argv[1]` é outra coisa (a flag
  * de linha de comando do próprio Electron, ou o caminho do `out/main/index.js`,
- * nunca o `dist/cli.js`). Por isso resolvido aqui, sempre explícito: dois
- * níveis acima deste arquivo compilado (`out/main/schedulesIpc.js`) é a raiz
- * do projeto, onde `npm run build` deixa o `dist/cli.js`.
+ * nunca o `dist/cli.js`). Por isso sempre explícito aqui.
+ *
+ * Em desenvolvimento, `out/main/schedulesIpc.js` e `dist/cli.js` são irmãos
+ * dois níveis abaixo da raiz do projeto. Empacotado (electron-builder —
+ * `asar: false` de propósito, ver `electron-builder.yml`), a raiz de
+ * verdade é `app.getAppPath()`, e não há garantia de `node` na PATH do
+ * usuário final (é um app de GUI, não uma ferramenta de desenvolvedor) —
+ * por isso roda o próprio executável do Maestro com
+ * `ELECTRON_RUN_AS_NODE=1` no lugar de um `node` externo. Testado ao vivo
+ * neste ambiente (ver o comentário de `buildTickCommand` em
+ * `src/scheduler/windowsTask.ts`): `ELECTRON_RUN_AS_NODE=1 electron
+ * dist/cli.js schedule tick` roda exatamente como `node dist/cli.js
+ * schedule tick`, `node:sqlite` incluso.
  */
-const dirname = fileURLToPath(new URL('.', import.meta.url));
-const cliPath = join(dirname, '../../dist/cli.js');
+function tickInvocationOptions(): { cliPath: string; nodePath?: string; env?: Record<string, string> } {
+  if (app.isPackaged) {
+    return {
+      cliPath: join(app.getAppPath(), 'dist/cli.js'),
+      nodePath: process.execPath,
+      env: { ELECTRON_RUN_AS_NODE: '1' },
+    };
+  }
+  return { cliPath: join(dirname, '../../dist/cli.js') };
+}
 
 /** Mesma formatação do `schedule install-task --dry-run` da CLI, para mostrar o comando antes de executá-lo de verdade. */
 function formatSchtasksCommand(intervalMinutes: number): string {
-  const args = buildInstallArgs({ intervalMinutes, cliPath });
+  const args = buildInstallArgs({ intervalMinutes, ...tickInvocationOptions() });
   const display = args.map((a) => (a.includes(' ') && !a.startsWith('"') ? `"${a}"` : a)).join(' ');
   return `schtasks ${display}`;
 }
@@ -195,7 +215,7 @@ export function registerScheduleIpcHandlers(): void {
 
   ipcMain.handle('maestro:schedules:installTask', async (_event, intervalMinutes: number): Promise<WindowsTaskActionResult> => {
     try {
-      await installWindowsTask({ intervalMinutes, cliPath });
+      await installWindowsTask({ intervalMinutes, ...tickInvocationOptions() });
       return { ok: true };
     } catch (err) {
       return { ok: false, reason: formatError(err) };

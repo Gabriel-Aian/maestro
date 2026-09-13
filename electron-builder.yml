@@ -1,0 +1,32 @@
+# Config do electron-builder — gera o instalador Windows do Maestro.
+#
+# `asar: false` é deliberado, não um esquecimento: o Agendador de Tarefas do
+# Windows dispara "schedule tick" fora do processo do Electron (via
+# `schtasks`/`cmd.exe`), um processo comum do SO que não sabe ler dentro de
+# um arquivo .asar. Empacotar sem asar deixa `dist/cli.js` (e o `node_modules`
+# de que ele depende) como arquivos de verdade no disco, legíveis por
+# qualquer processo — sem isso a tarefa agendada nunca conseguiria rodar.
+# Ver `electron/main/schedulesIpc.ts` e "Regras que o código assume" no
+# CLAUDE.md para o resto da história (por que o comando roda o próprio
+# executável do Maestro com ELECTRON_RUN_AS_NODE=1, em vez de exigir Node.js
+# instalado à parte).
+appId: com.maestro.app
+productName: Maestro
+asar: false
+directories:
+  output: release
+files:
+  - out/**/*
+  - dist/**/*
+  - package.json
+  - "!**/*.map"
+win:
+  target: nsis
+  artifactName: ${productName}-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+publish: null
