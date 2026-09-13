@@ -1,5 +1,28 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { QUEUE_EVENT_CHANNEL, type HistoryFilter, type HistoryRunView, type QueueEvent, type QueueJobView, type StatusView } from '../shared/ipc.js';
+import {
+  PROFILES_EVENT_CHANNEL,
+  QUEUE_EVENT_CHANNEL,
+  type ActionResult,
+  type AddProfileResult,
+  type BrowserView,
+  type HistoryFilter,
+  type HistoryRunView,
+  type LoginCheckResult,
+  type ProfileView,
+  type ProfilesEvent,
+  type QueueEvent,
+  type QueueJobView,
+  type StatusView,
+} from '../shared/ipc.js';
+
+/** Assina um canal de evento e devolve a função de cancelamento — chamar ao desmontar. */
+function subscribe<T>(channel: string, callback: (event: T) => void): () => void {
+  const listener = (_event: Electron.IpcRendererEvent, payload: T) => callback(payload);
+  ipcRenderer.on(channel, listener);
+  return () => {
+    ipcRenderer.removeListener(channel, listener);
+  };
+}
 
 /**
  * Superfície exposta ao renderer. Cresce tela por tela — nada de
@@ -12,17 +35,22 @@ const api = {
   listQueue: (): Promise<QueueJobView[]> => ipcRenderer.invoke('maestro:queue:list'),
   cancelJob: (jobId: string): Promise<boolean> => ipcRenderer.invoke('maestro:queue:cancel', jobId),
   killAllJobs: (): Promise<void> => ipcRenderer.invoke('maestro:queue:killAll'),
+  onQueueEvent: (callback: (event: QueueEvent) => void): (() => void) => subscribe(QUEUE_EVENT_CHANNEL, callback),
 
   listHistory: (filter: HistoryFilter = {}): Promise<HistoryRunView[]> => ipcRenderer.invoke('maestro:history:list', filter),
 
-  /** Retorna uma função de cancelamento — chame ao desmontar o componente. */
-  onQueueEvent: (callback: (event: QueueEvent) => void): (() => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, payload: QueueEvent) => callback(payload);
-    ipcRenderer.on(QUEUE_EVENT_CHANNEL, listener);
-    return () => {
-      ipcRenderer.removeListener(QUEUE_EVENT_CHANNEL, listener);
-    };
-  },
+  listBrowsers: (): Promise<BrowserView[]> => ipcRenderer.invoke('maestro:browsers:list'),
+  addBrowserPath: (id: string, path: string): Promise<ActionResult> => ipcRenderer.invoke('maestro:browsers:addPath', { id, path }),
+
+  listProfiles: (): Promise<ProfileView[]> => ipcRenderer.invoke('maestro:profiles:list'),
+  addProfile: (name: string, browserId: string): Promise<AddProfileResult> =>
+    ipcRenderer.invoke('maestro:profiles:add', { name, browserId }),
+  removeProfile: (id: string): Promise<void> => ipcRenderer.invoke('maestro:profiles:remove', id),
+  onProfilesEvent: (callback: (event: ProfilesEvent) => void): (() => void) => subscribe(PROFILES_EVENT_CHANNEL, callback),
+
+  startLogin: (profileId: string, url: string): Promise<ActionResult> => ipcRenderer.invoke('maestro:login:start', { profileId, url }),
+  checkLogin: (profileId: string): Promise<LoginCheckResult> => ipcRenderer.invoke('maestro:login:check', profileId),
+  completeLogin: (profileId: string): Promise<ActionResult> => ipcRenderer.invoke('maestro:login:complete', profileId),
 };
 
 contextBridge.exposeInMainWorld('maestro', api);

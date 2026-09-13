@@ -7,7 +7,7 @@ export { runSearchBatch } from './search/runner.js';
 export { expandSearches, loadSearchFile, validateSearchFile } from './search/searchFile.js';
 export { saveFlow, loadFlow, listFlowVersions, restoreFlowVersion } from './store/flowStore.js';
 export { detectBrowsers, validateBrowserPath } from './browsers/detect.js';
-export { BrowserPool, launchProfile, isProfileLocked } from './browsers/launcher.js';
+export { BrowserPool, launchProfile, isProfileLocked, openProfilePlain } from './browsers/launcher.js';
 export { loadConfig, saveConfig } from './config/config.js';
 export { profiles, flowsIndex, runs, schedules, getDb, type FlowIndexRow } from './db/index.js';
 export { isDue, minuteKey, runDueSchedules, type ScheduleEnqueuer, type TickResult } from './scheduler/scheduler.js';

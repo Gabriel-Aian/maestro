@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { QueueScreen } from './screens/QueueScreen.js';
 import { HistoryScreen } from './screens/HistoryScreen.js';
+import { ProfilesScreen } from './screens/ProfilesScreen.js';
 
-type Screen = 'queue' | 'history';
+type Screen = 'queue' | 'history' | 'profiles';
 
 const NAV: Array<{ id: Screen; label: string }> = [
   { id: 'queue', label: 'Fila' },
   { id: 'history', label: 'Histórico' },
+  { id: 'profiles', label: 'Perfis' },
 ];
 
 export function App() {
@@ -35,6 +37,7 @@ export function App() {
       <main className="main">
         {screen === 'queue' && <QueueScreen />}
         {screen === 'history' && <HistoryScreen />}
+        {screen === 'profiles' && <ProfilesScreen />}
       </main>
     </div>
   );

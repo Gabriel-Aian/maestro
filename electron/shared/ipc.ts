@@ -65,3 +65,43 @@ export type QueueEvent =
   | { type: 'killed' };
 
 export const QUEUE_EVENT_CHANNEL = 'maestro:queueEvent';
+
+/* ─────────────────────────  PERFIS E NAVEGADORES  ───────────────────────── */
+
+export interface BrowserView {
+  id: string;
+  name: string;
+  /** null quando nem detectado no Registro nem registrado manualmente. */
+  executablePath: string | null;
+  source: 'registry' | 'filesystem' | 'manual' | 'none';
+}
+
+export interface ProfileView {
+  id: string;
+  name: string;
+  browserId: string;
+  status: 'never_authenticated' | 'authenticated' | 'session_expired';
+  /** Navegador aberto agora (login em andamento, ou execução ativa). */
+  locked: boolean;
+  lastUsedAt: string | null;
+  createdAt: string;
+}
+
+export type ActionResult = { ok: true } | { ok: false; reason: string };
+export type AddProfileResult = { ok: true; profile: ProfileView } | { ok: false; reason: string };
+export interface LoginCheckResult {
+  locked: boolean;
+}
+
+/**
+ * Login manual "sem automação" (RNF-006, RF-009): o navegador é aberto por
+ * processo do sistema operacional direto, sem CDP — nenhum provedor de
+ * identidade recusa por detectar automação. Como o processo não é
+ * controlado, não há como saber programaticamente quando o login terminou;
+ * por isso o widget flutuante (`#/login-widget`) em vez de fechar sozinho.
+ */
+export const LOGIN_DEFAULT_URL = 'https://www.google.com/';
+
+/** O widget de login é uma janela separada — este evento avisa a tela de Perfis quando ele termina lá. */
+export type ProfilesEvent = { type: 'login-completed'; profileId: string };
+export const PROFILES_EVENT_CHANNEL = 'maestro:profilesEvent';

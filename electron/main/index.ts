@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initMaestro, shutdownMaestro } from './maestro.js';
 import { registerIpcHandlers } from './ipc.js';
+import { registerProfileIpcHandlers } from './profilesIpc.js';
 
 const dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -46,6 +47,7 @@ app.whenReady().then(async () => {
   // como na CLI.
   await initMaestro();
   registerIpcHandlers();
+  registerProfileIpcHandlers();
 
   createWindow();
 

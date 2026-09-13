@@ -30,12 +30,12 @@ Fases 1 a 4, 6 e 7 do plano estão implementadas. 83 testes passando, typecheck 
 | Motor de pesquisas com expansão de variáveis | |
 | Agendamento (`node-cron` + Agendador de Tarefas do Windows) | |
 | CLI cobrindo todas as operações | |
-| Casca Electron — fundação + telas de fila e histórico | Telas de perfis, fluxos, pesquisas, agendamentos, config |
+| Casca Electron — fundação + telas de fila, histórico e perfis/navegadores | Telas de fluxos, pesquisas, agendamentos, config |
 | | Instalador Windows (electron-builder) |
 
 **Nunca foi executado contra navegador real neste ambiente de desenvolvimento** — não havia Chromium disponível. A lógica pura está testada; o comportamento com Brave/Chrome/Edge foi validado manualmente pelo usuário no Windows dele. **O mesmo vale para `schtasks.exe`**: `schedule install-task`/`uninstall-task`/`task-status` nunca rodaram contra um Agendador de Tarefas real (este ambiente é Linux) — a sintaxe foi escrita com cuidado, mas confirme com `schedule install-task --dry-run` antes de instalar de verdade, e depois com `schedule task-status`.
 
-**A casca Electron, ao contrário do navegador e do `schtasks`, FOI testada de ponta a ponta neste ambiente** — via `Xvfb` (display virtual headless), tanto `electron-vite build` + `electron out/main/index.js --no-sandbox` quanto `electron-vite dev --noSandbox`. Em ambos os casos o renderer chamou o preload, que chamou o processo principal, que chamou o núcleo de verdade (`profiles.list()`, `detectBrowsers()`, etc.) e voltou com dado real. As telas de fila e histórico também foram verificadas visualmente assim: `webContents.capturePage()` tirando print de uma janela invisível sob Xvfb, contra um banco semeado com perfis/fluxos/jobs/execuções falsos — inclusive viu a fila real processar jobs semeados (e falhar ao tentar abrir um navegador que não existe aqui, como esperado). `--no-sandbox`/`--noSandbox` é só para rodar sem privilégio de container aqui; não leve isso para o app real no Windows.
+**A casca Electron, ao contrário do navegador e do `schtasks`, FOI testada de ponta a ponta neste ambiente** — via `Xvfb` (display virtual headless), tanto `electron-vite build` + `electron out/main/index.js --no-sandbox` quanto `electron-vite dev --noSandbox`. Em ambos os casos o renderer chamou o preload, que chamou o processo principal, que chamou o núcleo de verdade (`profiles.list()`, `detectBrowsers()`, etc.) e voltou com dado real. As telas (fila, histórico, perfis, o widget de login) também foram verificadas visualmente assim: `webContents.capturePage()` tirando print de janelas invisíveis sob Xvfb, contra um banco semeado com perfis/fluxos/jobs/execuções falsos — inclusive viu a fila real processar jobs semeados e o fluxo de login real falhar corretamente ao tentar abrir um navegador que não existe aqui. `--no-sandbox`/`--noSandbox` é só para rodar sem privilégio de container aqui; não leve isso para o app real no Windows. **Transparência real de janela (`transparent: true` do widget) não foi confirmada visualmente** — Xvfb não tem compositor, e capturar só o conteúdo da própria janela não revela se o fundo do SO aparece por trás como deveria no Windows real; o que foi confirmado é que a janela abre do tamanho certo, sem moldura, e o conteúdo (cartão escuro semi-transparente, botões) renderiza como projetado.
 
 ## Arquitetura
 
@@ -69,13 +69,16 @@ electron/                 # casca Electron — NÃO faz parte do pacote "maestro
 ├── shared/ipc.ts         # contrato IPC (tipos + nomes de canal) — main e renderer importam daqui, nunca um do outro
 ├── main/
 │   ├── maestro.ts        # instância ÚNICA de Maestro para a vida do app (não "por comando" como a CLI)
-│   ├── ipc.ts             # ipcMain.handle(...) + repassa eventos da fila (enqueued/started/finished/failed/killed) para as janelas
-│   └── index.ts           # janela + ciclo de vida do app; importa src/index.ts DIRETO (fonte, não dist/)
+│   ├── ipc.ts             # fila/histórico: ipcMain.handle(...) + repassa eventos (enqueued/started/finished/failed/killed)
+│   ├── profilesIpc.ts     # perfis/navegadores/login: mesmo padrão, chamando openProfilePlain (sem automação)
+│   ├── loginWidget.ts     # janela flutuante separada que substitui o "pressione Enter" da CLI no login manual
+│   └── index.ts           # janela principal + ciclo de vida do app; importa src/index.ts DIRETO (fonte, não dist/)
 ├── preload/index.ts      # contextBridge — única coisa exposta ao renderer
 └── renderer/src/
     ├── App.tsx            # shell: sidebar de navegação + tela ativa
-    ├── screens/           # uma tela por arquivo (QueueScreen, HistoryScreen, ...)
-    └── styles.css         # design system (cores, tabela, badges, botões) — sem framework de UI
+    ├── LoginWidget.tsx    # UI da janela flutuante — roteada por hash (#/login-widget), não por um entry point separado
+    ├── screens/           # uma tela por arquivo (QueueScreen, HistoryScreen, ProfilesScreen, ...)
+    └── styles.css         # design system (cores, tabela, badges, botões, widget) — sem framework de UI
 ```
 
 ## Regras que o código assume — não quebre
@@ -93,6 +96,8 @@ electron/                 # casca Electron — NÃO faz parte do pacote "maestro
 **Nenhuma senha é armazenada, em nenhuma hipótese (RNF-001).** Autenticação é sempre manual, e a sessão persiste no diretório de perfil.
 
 **Não implemente contorno de CAPTCHA nem mascaramento de automação (RNF-006).** Decisão de projeto, não limitação técnica. Ao detectar desafio, a execução para com status `blocked` e o perfil é congelado. Provedores de identidade (Google, Microsoft) recusam login em navegador automatizado por design — a resposta é `profile login`, que abre o navegador **sem** automação para o usuário autenticar como humano.
+
+**A GUI usa `openProfilePlain` (sem automação) para login, nunca `launchProfile` (Playwright).** Decisão explícita do usuário: como o navegador do login não é controlado por CDP, o processo principal não tem nenhuma visibilidade sobre o que acontece dentro dele — por isso o widget flutuante (`electron/main/loginWidget.ts` + `#/login-widget`) em vez de detectar a conclusão sozinho. `maestro:login:complete` reexecuta a mesma checagem de `isProfileLocked` da CLI antes de marcar `authenticated`; não confie em estado do lado do renderer para essa decisão.
 
 **Agendamento nunca roda headed (RN-007).** A sessão do Windows pode estar bloqueada quando o disparo acontece, e automação visível não funciona nesse cenário. `Maestro.enqueueSchedule()` força `headless: true` incondicionalmente — não adicione uma opção para desligar isso.
 
@@ -164,7 +169,7 @@ No Windows com PowerShell, se `npm` for bloqueado por política de execução, u
 1. **Validar o gravador em sites reais.** É o maior risco aberto. Peça ao usuário o `flow show` de fluxos gravados em sites de verdade e calibre as heurísticas de `injected.ts` em cima dos casos concretos — especialmente `looksGenerated()`, que pode estar descartando identificadores válidos ou aceitando gerados.
 2. **Validar o agendamento no Windows real.** Segundo maior risco aberto, mesma natureza do item 1: `schedule install-task`/`tick` nunca rodaram contra um Agendador de Tarefas de verdade. Peça ao usuário para instalar com `--dry-run` primeiro, depois de verdade, e conferir com `schedule task-status` e `schedule list` (próxima janela calculada) se bate com o Agendador de Tarefas nativo do Windows.
 3. **Editor de fluxos (fase 5, RF-031 a RF-039).** Remover passos, reordenar, parametrizar valores em variáveis, inserir esperas e asserções. Hoje só dá para editar o JSON à mão.
-4. **Telas da casca Electron, na ordem combinada com o usuário: ~~fila/histórico~~ (prontas) → perfis/navegadores → fluxos (listar/rodar, não o editor — item 3, à parte) → pesquisas → agendamentos → configurações → empacotamento (electron-builder, instalador Windows).** Fila e histórico seguem o padrão a repetir: `electron/shared/ipc.ts` (contrato) → handler em `electron/main/ipc.ts` (busca do núcleo real, sem caminho paralelo) → método no preload → tela em `electron/renderer/src/screens/`. Perfis/navegadores é a próxima: precisa de ações que hoje só existem como fluxo interativo de CLI (`profile login` abre navegador sem automação e espera Enter no terminal — pensar em como isso vira UI antes de começar).
+4. **Telas da casca Electron, na ordem combinada com o usuário: ~~fila/histórico~~ ~~perfis/navegadores~~ (prontas) → fluxos (listar/rodar, não o editor — item 3, à parte) → pesquisas → agendamentos → configurações → empacotamento (electron-builder, instalador Windows).** Padrão a repetir para cada uma: `electron/shared/ipc.ts` (contrato) → handler em `electron/main/*Ipc.ts` (busca do núcleo real, sem caminho paralelo) → método no preload → tela em `electron/renderer/src/screens/`. Fluxos é a próxima: rodar um fluxo tem passo a passo interativo na CLI (`--step`, confirmando cada ação) — decidir se a GUI reproduz isso ou só oferece rodar direto e ver o resultado depois.
 5. **Retenção e métricas na UI (RF-071 a RF-077).** A lógica existe (`Maestro.cleanupArtifacts()`, `runs.stats()`), falta superfície.
 
 ## Pontos em aberto com o usuário
