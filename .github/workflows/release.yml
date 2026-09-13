@@ -1,0 +1,65 @@
+name: Release Windows installer
+
+# Publica um instalador novo (e a Release do GitHub que alimenta o
+# auto-update, ver electron/main/autoUpdate.ts) a cada merge em main —
+# nenhum passo manual, nenhum token pessoal envolvido: o `GITHUB_TOKEN` é
+# gerado e destruído pelo próprio GitHub Actions a cada execução (ver
+# "permissions" abaixo), nunca passa pela máquina de ninguém.
+"on":
+  push:
+    branches: [main]
+
+# "contents: write" é o que permite ao GITHUB_TOKEN automático criar a
+# Release (que inclui criar a tag) — sem isso o passo de publish falharia
+# por falta de permissão.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # windows-latest runner de verdade: signtool/rcedit são nativos aqui,
+    # nenhum contorno de wine (esse só existe no ambiente de dev Linux, ver
+    # CLAUDE.md).
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Nunca publica um instalador quebrado: se typecheck ou teste falhar, o
+      # job para aqui e nenhuma Release sai.
+      - name: Testar e checar tipos
+        run: |
+          npm test
+          npm run typecheck
+          npm run electron:typecheck
+
+      # Nunca commitamos essa mudança de volta no repositório — só editamos
+      # o package.json DESTA execução (descartado ao final do job). A versão
+      # publicada vira <major>.<minor-do-package.json>.<run_number>: o
+      # run_number do GitHub só cresce a cada execução deste workflow, então
+      # a versão é sempre estritamente maior que a anterior — exatamente o
+      # que o electron-updater precisa para saber que há algo mais novo. Uma
+      # bump manual de major/minor no package.json (para um marco de verdade)
+      # continua funcionando normalmente: a próxima versão automática vira
+      # <novo-major>.<novo-minor>.<run_number>, que já derrota qualquer
+      # 0.<minor-antigo>.<run_number-antigo>.
+      - name: Definir versão desta Release
+        shell: bash
+        run: |
+          base=$(node -p "require('./package.json').version.split('.').slice(0, 2).join('.')")
+          version="${base}.${{ github.run_number }}"
+          npm pkg set version="$version"
+          echo "Publicando versão $version"
+
+      - name: Build e publicar instalador
+        run: npm run package:win:publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
