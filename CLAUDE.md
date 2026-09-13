@@ -15,7 +15,7 @@ O `README.md` documenta o uso. O levantamento de requisitos completo (RF-001 a R
 
 ## Estado atual
 
-Fases 1 a 4, 6 e 7 do plano estão implementadas. 93 testes passando, typecheck limpo.
+Fases 1 a 4, 6 e 7 do plano estão implementadas. 100 testes passando, typecheck limpo.
 
 | Pronto | Não implementado |
 |---|---|
@@ -32,6 +32,9 @@ Fases 1 a 4, 6 e 7 do plano estão implementadas. 93 testes passando, typecheck 
 | CLI cobrindo todas as operações | |
 | Casca Electron — fundação + todas as telas (fila, histórico, perfis/navegadores, fluxos, pesquisas, agendamentos, configurações) | |
 | Empacotamento Windows (electron-builder, `npm run package:win`) | Ícone/branding reais (usa o ícone padrão do Electron) |
+| Agendamento com "modo simples" (periodicidade + horário) além do cron cru | |
+| Sorteio de N pesquisas sem repetir por execução (`sampleSize`) | |
+| Atualização automática via GitHub Releases (`electron-updater`) | Certificado de assinatura de código (sem ele, SmartScreen avisa "editor desconhecido" tanto na instalação quanto no update) |
 
 **Nunca foi executado contra navegador real neste ambiente de desenvolvimento** — não havia Chromium disponível. A lógica pura está testada; o comportamento com Brave/Chrome/Edge foi validado manualmente pelo usuário no Windows dele. **O mesmo vale para `schtasks.exe`**: `schedule install-task`/`uninstall-task`/`task-status` nunca rodaram contra um Agendador de Tarefas real (este ambiente é Linux) — a sintaxe foi escrita com cuidado, mas confirme com `schedule install-task --dry-run` antes de instalar de verdade, e depois com `schedule task-status`.
 
@@ -55,6 +58,10 @@ Na tela de Configurações:
 **O empacotamento (electron-builder) foi testado de ponta a ponta neste ambiente, ao contrário do navegador e do Agendador de Tarefas** — instalando `wine`/`wine32` neste container Linux (só necessário aqui; um build real no Windows ou num runner `windows-latest` não precisa de wine nenhum) e rodando `npm run package:win` de verdade, não só revisando a config. Isso resolveu o ponto que tinha ficado em aberto na frente de Agendamentos:
 10. `electron-builder.yml` tinha `asar: false` só no COMENTÁRIO explicativo, não como chave de configuração de verdade — o build empacotava tudo (`dist/`, `node_modules`) dentro de `app.asar` mesmo assim. Como `schtasks`/`cmd.exe` (processos comuns do SO, fora do Electron) não sabem ler dentro de um `.asar`, a tarefa agendada da GUI empacotada nunca teria funcionado. Corrigido adicionando a chave `asar: false` de verdade — confirmado no build real: `resources/app/dist/cli.js` e `resources/app/node_modules/` (só as dependências de produção, sem `electron`/`vite`/etc.) existem como arquivos de verdade no instalador gerado.
 11. Confirmado ao vivo (`ELECTRON_RUN_AS_NODE=1 electron dist/cli.js schedule tick`, usando o binário real do Electron 44 deste projeto) que o runtime Node embutido no Electron (Node 24.20.0, mais novo que o Node 22 usado no desenvolvimento) roda `dist/cli.js` — `node:sqlite` incluso — exatamente como `node dist/cli.js` rodaria. Isso resolve a pergunta em aberto "e se o usuário final não tiver Node.js instalado": `schedulesIpc.ts` agora detecta `app.isPackaged` e, quando empacotado, monta o comando do tick com `nodePath: process.execPath` (o próprio `Maestro.exe`) e `env: { ELECTRON_RUN_AS_NODE: '1' }` em vez de depender de um `node` externo — ver `buildTickCommand()` em `src/scheduler/windowsTask.ts`, que agora aceita `env` e embrulha o comando em `cmd.exe /c "set VAR=1&&..."` quando necessário (`schtasks /tr` só aceita uma linha de comando, sem campo de ambiente próprio). Não foi possível confirmar rodando o `Maestro.exe` (PE do Windows) de verdade via wine neste ambiente — wine aqui não tem WOW64 completo para executáveis desse tipo — mas o mecanismo (`ELECTRON_RUN_AS_NODE`) é uma feature estável e documentada do próprio Electron, não algo específico de SO; o binário Linux e o binário Windows do mesmo Electron 44 embutem o mesmo runtime Node. Coberto por `test/scheduler.test.ts`.
+
+Na volta seguinte, respondendo a relatos e pedidos do usuário sobre a tela de Agendamentos, sorteio de pesquisas e auto-update:
+12. **Bug de UX real na tela de Agendamentos, achado a partir de um relato do usuário** ("os campos ficam travados e não me permitem criar um novo [agendamento] logo"): `NewScheduleCard.canSubmit` exigia `name`/`cron` preenchidos para habilitar "Criar agendamento" — mas o `create()` bem-sucedido zera `name`/`cron` de propósito (mantendo `flowId`/`profileId` para facilitar criar o próximo agendamento parecido, ex.: mesmo fluxo em `conta-2` depois de `conta-1`, exatamente o padrão do relato). O botão ficava cinza de novo na hora, sem NENHUMA mensagem explicando por quê — indistinguível de um bug de verdade para quem está usando a tela, mesmo a tabela por trás continuando 100% correta (como o próprio usuário desconfiou). As duas validações dentro de `create()` (fluxo/perfil, arquivo de pesquisas) já existiam mas eram código morto: nunca disparavam, porque `canSubmit` já exigia exatamente essas condições antes do clique ser possível. Corrigido relaxando `canSubmit` para só depender de `!busy` — clicar sempre é permitido, e `create()` agora valida tudo (nome, cron, e as duas condições que já existiam) mostrando uma mensagem específica em `formError` para cada requisito faltante. Confirmado ao vivo via Xvfb: criar dois agendamentos em sequência para o mesmo fluxo (repetindo o cenário exato do print enviado) mantém o botão verde/clicável o tempo todo, e clicar com campos vazios mostra "Dê um nome ao agendamento." em vez de travar silenciosamente.
+13. **Bug de bootstrap achado ao ligar o auto-update pela primeira vez**: `import { autoUpdater } from 'electron-updater'` compila limpo (`tsc`) mas quebra em runtime — `electron-updater` é CommonJS e o pacote não expõe `autoUpdater` como named export ESM de verdade (o `cjs-module-lexer` do Node não enxerga através do `module.exports` dele). Confirmado ao vivo via Xvfb: com o named import, a janela principal nem chega a abrir — `out/main/index.js` lança `SyntaxError: Named export 'autoUpdater' not found` na hora do `app.whenReady()`, sem nenhum aviso em tempo de build. Corrigido importando o default export e desestruturando depois (`import electronUpdater from 'electron-updater'; const { autoUpdater } = electronUpdater;`) em `electron/main/autoUpdate.ts` — é a mesma correção que a própria mensagem de erro do Node sugere. Fique atento ao mesmo padrão em qualquer outro pacote CJS-only adicionado no futuro: `tsc` nunca vai pegar esse tipo de erro, só rodar de verdade (Xvfb, de novo, sendo o que pegou).
 
 ## Arquitetura
 
@@ -167,6 +174,14 @@ electron-builder.yml        # instalador Windows — asar:false é deliberado, v
 
 **`electron/main/schedulesIpc.ts` monta o comando do tick de um jeito quando empacotado, de outro em desenvolvimento.** `tickInvocationOptions()` checa `app.isPackaged`: empacotado, usa `cliPath: join(app.getAppPath(), 'dist/cli.js')`, `nodePath: process.execPath` (o próprio `Maestro.exe`) e `env: { ELECTRON_RUN_AS_NODE: '1' }` — não dá para contar com `node` instalado à parte num app de GUI para usuário final. Em desenvolvimento, usa só `cliPath` relativo (`out/main/schedulesIpc.js` → dois níveis acima → `dist/cli.js`) e deixa `buildTickCommand()` cair no default `"node"` puro. Testado ao vivo neste ambiente (ver o bug 11 acima) que `ELECTRON_RUN_AS_NODE=1` faz o binário do Electron se comportar como `node` de verdade, `node:sqlite` incluso — não invente um mecanismo alternativo (baixar um Node portátil, relançar o próprio app com uma flag `--tick`, etc.) sem antes confirmar que este já não resolve.
 
+**O "modo simples" de agendamento (`NewScheduleCard`, `SchedulesScreen.tsx`) é só tradução na GUI — o núcleo continua entendendo exclusivamente cron.** `buildSimpleCron(periodicity, time, weekdays, everyN)` traduz periodicidade + horário HH:MM (mais dias da semana, quando aplicável) para a expressão cron equivalente, mantida sincronizada em `cron` via `useEffect`; o "modo avançado" (cron cru) continua existindo lado a lado, não foi substituído. Nenhum schema, IPC ou lógica de `src/` sabe que "modo simples" existe — isso é deliberado (evita duplicar a semântica de cron em dois lugares); se um dia for preciso persistir a escolha do usuário (ex.: reabrir um agendamento existente já no modo simples), vai exigir guardar a periodicidade/horário separadamente, não tentar re-parsear um cron arbitrário de volta.
+
+**`sampleSize` (pesquisas) é sempre um parâmetro de invocação, nunca um campo do arquivo JSON de pesquisas.** Mesmo padrão de `themeIds`: passado por `opts` em `expandSearches()`/`enqueueSearches()` (núcleo), por `--sample-size` (CLI, tanto em `search run` quanto em `schedule add --search`) e por um campo numérico na GUI (`SearchesScreen` "Rodar", `SchedulesScreen` alvo de pesquisas) — nunca em `SearchDefaultsSchema`. Quando definido e menor que o total já filtrado por tema, `expandSearches()` sorteia (Fisher–Yates parcial, sem repetição) exatamente esse número da lista expandida; `undefined` preserva o comportamento de sempre (todas as pesquisas ativas, ordem do arquivo). Sortear ANTES de agrupar por perfil (dentro de `expandSearches`, não depois em `enqueueSearches`) é proposital — o sorteio é sobre o total do arquivo, não por perfil. Coberto por `test/searchFile.test.ts`.
+
+**Auto-update (`electron/main/autoUpdate.ts`) baixa sozinho mas nunca instala sozinho.** `autoUpdater.autoDownload = true` (baixar em segundo plano não afeta nenhuma automação em andamento) mas `autoInstallOnAppQuit = false` — instalar reinicia o processo inteiro, o que mataria qualquer fluxo/pesquisa em execução (a `BrowserPool` vive no mesmo processo, `electron/main/maestro.ts`). A tela de Configurações só oferece "Reiniciar e instalar" depois que o download termina (`state: 'downloaded'`), nunca automaticamente. `scheduleAutoUpdateChecks()` e todo handler IPC de update são no-op fora de `app.isPackaged` (não existe update a checar em desenvolvimento — `electron-updater` exigiria um `dev-app-update.yml` que este projeto não tem e não precisa). **Cuidado ao importar `electron-updater`**: é CommonJS puro, `import { autoUpdater } from 'electron-updater'` compila mas quebra em runtime (`tsc` não pega, só rodar de verdade via Xvfb pegou — ver bug 13 em "Estado atual"); use sempre `import electronUpdater from 'electron-updater'; const { autoUpdater } = electronUpdater;`.
+
+**Canal de auto-update é GitHub Releases PÚBLICO — decisão explícita do usuário, não default técnico.** `electron-builder.yml`'s `publish: { provider: github, owner: Gabriel-Aian, repo: maestro }` funciona sem token embutido no app só porque as Releases são públicas; um canal privado exigiria embutir um token de leitura dentro do próprio `.exe` distribuído, legível por qualquer um que o abra — não faça essa troca sem confirmar de novo com o usuário. Publicar uma versão nova é sempre um passo manual e separado (`npm run package:win:publish`, que passa `--publish=always` e exige `GH_TOKEN` no ambiente de quem builda) — `npm run package:win` continua com `--publish=never` de propósito, nunca publica como efeito colateral de um build comum. **Isso não elimina o trabalho de lançar uma versão**: alguém ainda precisa gerar o instalador e publicá-lo a cada atualização; o que o auto-update remove é só o usuário final ter que baixar e reinstalar manualmente. Nunca testado publicando uma Release de verdade neste ambiente (exigiria `GH_TOKEN` real e a intenção explícita de publicar algo público) — o que foi confirmado é a checagem/download/instalação do lado do app (`autoUpdater`, IPC, UI) contra o `app.isPackaged` corretamente detectado como falso em desenvolvimento.
+
 ## Decisões técnicas e seus porquês
 
 **`node:sqlite` em vez de `better-sqlite3`.** O nativo exige recompilar para a ABI do Electron a cada atualização, que é a maior dor no empacotamento. A camada está isolada em `src/db/index.ts` — trocar é alterar só esse arquivo. O módulo ainda é experimental no Node 22; o aviso é filtrado no topo de `cli.ts`.
@@ -185,7 +200,7 @@ electron-builder.yml        # instalador Windows — asar:false é deliberado, v
 npm install
 npm run build        # tsc
 npm run typecheck    # tsc --noEmit
-npm test             # vitest, 93 testes
+npm test             # vitest, 100 testes
 npm run dev -- <cmd> # roda a CLI direto do TS
 
 node dist/cli.js doctor
@@ -195,8 +210,11 @@ node dist/cli.js record "Fluxo" --url https://site.com --profile conta-1
 node dist/cli.js flow show <id>
 node dist/cli.js flow run <id> --profile conta-1 --step
 node dist/cli.js search validate examples/searches.example.json
+node dist/cli.js search validate examples/searches-200.json      # exemplo com 220 pesquisas em 9 temas (pedido do usuário)
+node dist/cli.js search run examples/searches-200.json --sample-size 20  # sorteia 20 das 220, sem repetir nesta execução
 
 node dist/cli.js schedule add "Diário 9h" --cron "30 9 * * *" --flow <id> --profile conta-1
+node dist/cli.js schedule add "Pesquisas 9h" --cron "0 9 * * *" --search examples/searches-200.json --sample-size 15
 node dist/cli.js schedule run <id>              # dispara agora, ignorando o cron — teste antes de confiar
 node dist/cli.js schedule install-task --dry-run  # mostra o comando schtasks sem instalar nada
 node dist/cli.js schedule install-task            # Windows: registra a tarefa única que roda "schedule tick"
@@ -204,10 +222,13 @@ node dist/cli.js schedule install-task            # Windows: registra a tarefa �
 npm run electron:dev        # electron-vite dev — janela + HMR do renderer
 npm run electron:build      # electron-vite build — gera out/{main,preload,renderer}
 npm run electron:typecheck  # tsc sobre electron/ (main+preload e renderer, tsconfigs separados)
-npm run package:win         # build completo + electron-builder --win → release/Maestro-Setup-<versão>.exe
+npm run package:win         # build completo + electron-builder --win → release/Maestro-Setup-<versão>.exe (nunca publica)
+npm run package:win:publish # o mesmo, mas publica a Release no GitHub (--publish=always) — exige GH_TOKEN no ambiente
 ```
 
 No Windows com PowerShell, se `npm` for bloqueado por política de execução, use `npm.cmd`.
+
+O `Maestro-Setup-<versão>.exe` gerado por `npm run package:win` é autocontido — pode ser copiado/compartilhado para instalar em qualquer desktop Windows, sem precisar de Node, git ou qualquer ferramenta de desenvolvimento na máquina de destino (só o instalador em si). Isso é o mecanismo de distribuição já previsto, não uma limitação a contornar.
 
 `npm run package:win` num Windows real (ou num runner `windows-latest`) não precisa de nada além do `npm install` — `signtool.exe`/`rcedit.exe` já são nativos ali. Só neste ambiente de desenvolvimento (Linux) o electron-builder precisa de `wine` para rodar essas ferramentas por baixo: `apt-get install --no-install-recommends wine64 wine` mais `dpkg --add-architecture i386 && apt-get install --no-install-recommends wine32:i386` (WOW64 completo). Mesmo assim, o `wine` do sistema tem um bug de spawn (`getWineToolset` do electron-builder devolve `execPath: "wine"` sem `PATH` no `env`, e o pacote `wine` do Ubuntu não deixa `/usr/bin/wine` num alternative confiável) — contorne apontando `ELECTRON_BUILDER_WINE_TOOLSET_DIR` para uma pasta com `bin/wine` (symlink para `/usr/lib/wine/wine`), `lib/` e `wine-home/` (podem ficar vazios, só precisam existir). Nenhuma dessas exigências vale para uma build de verdade no Windows.
 
@@ -217,7 +238,7 @@ No Windows com PowerShell, se `npm` for bloqueado por política de execução, u
 - `test/compile.test.ts` — coalescência e troca de abas.
 - `test/blockDetection.test.ts` — falsos positivos de login, CAPTCHA.
 - `test/queue.test.ts` — invariantes de escalonamento com handler falso, incluindo o delay entre jobs do mesmo perfil.
-- `test/searchFile.test.ts` — validação, herança, expansão.
+- `test/searchFile.test.ts` — validação, herança, expansão; e `sampleSize` (sorteio sem repetição, respeita o total quando N ≥ tamanho do pool, combina com o filtro por tema, comportamento de sempre quando omitido).
 - `test/timing.test.ts` — precedência de delay (passo > fluxo > global) e conversão de intervalos gravados em passos reais.
 - `test/scheduler.test.ts` — `isDue`/idempotência do tick/isolamento de falha; construção do comando `schtasks` sem executá-lo, incluindo o default correto de `nodePath` (`"node"`, nunca `process.execPath`) e o embrulho em `cmd.exe /c "set VAR=1&&..."` quando `env` é passado (caso da GUI empacotada, `ELECTRON_RUN_AS_NODE`).
 - `test/orchestrator.test.ts` — atomicidade por perfil de `enqueueSearches` (nenhum job é enfileirado se qualquer perfil do lote for inválido, mesmo com outros válidos); que um agendamento registra `lastStatus: 'failed'` mesmo quando o job lança antes de produzir um `RunResult`; e que `Maestro.updateConfig()` reflete na instância em memória (campo lido ao vivo + `browserPaths` recalculado), não só no disco.
@@ -236,7 +257,10 @@ No Windows com PowerShell, se `npm` for bloqueado por política de execução, u
    - **Ícone/branding reais.** Hoje usa o ícone padrão do Electron (`electron-builder` avisa "default Electron icon is used" no log do build) — falta um `.ico` de verdade e decidir `appId`/`productName` definitivos (hoje `com.maestro.app`/`Maestro`, provisório).
    - **Nunca instalado de verdade num Windows real.** Mesma natureza da ressalva já existente sobre `schtasks`/navegador: o `.exe` gerado (`release/Maestro-Setup-<versão>.exe`) nunca rodou fora deste ambiente Linux. `ELECTRON_RUN_AS_NODE` para o tick foi confirmado com o binário Linux do mesmo Electron 44 (mecanismo documentado do próprio Electron, não específico de SO) — mas vale confirmar clicando o instalador de verdade, testando "Instalar tarefa" pela GUI empacotada, e conferindo com `schtasks /query` que a tarefa dispara.
    - **Assinatura de código.** Sem certificado — o instalador vai gerar aviso do SmartScreen do Windows ("editor desconhecido"). Não é um bug, é a ausência de um certificado de assinatura (custo/processo à parte, decisão do usuário se e quando obter um).
-   - **Auto-update.** Não pedido ainda; `publish: null` no `electron-builder.yml` desliga isso de propósito.
+   - **~~Auto-update.~~ Implementado** (`electron-updater`, ver "Regras que o código assume" e o bug 13 em "Estado atual") — canal GitHub Releases público, decisão explícita do usuário. O que ainda falta:
+     - **Nunca publicada uma Release de verdade.** `npm run package:win:publish` nunca rodou neste ambiente (exigiria `GH_TOKEN` real e a intenção explícita de publicar algo público) — o que foi confirmado é o lado do app (checagem/download/UI) contra `app.isPackaged` falso em dev, mostrando corretamente "não suportado aqui".
+     - **Repositório/Releases do GitHub precisam estar de fato públicos.** É uma configuração do GitHub (Settings → visibilidade do repo, ou ao menos das Releases), fora do que um commit consegue mudar — confirme isso antes de depender do auto-update em produção.
+     - **Sem certificado de assinatura** (mesmo ponto do instalador manual) — updates baixados sem assinatura têm mais chance de levar aviso do Windows Defender/SmartScreen do que um binário assinado.
 6. **Retenção e métricas na UI (RF-071 a RF-077).** A lógica existe (`Maestro.cleanupArtifacts()`, `runs.stats()`), falta superfície.
 
 ## Pontos em aberto com o usuário

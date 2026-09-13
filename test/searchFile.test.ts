@@ -112,4 +112,56 @@ describe('expandSearches', () => {
 
     expect(expandSearches(file, { themeIds: ['t2'] }).map((s) => s.query)).toEqual(['b']);
   });
+
+  describe('sampleSize', () => {
+    function fileWith(n: number) {
+      return parse({
+        ...base,
+        themes: [{ id: 't1', name: 'X', queries: Array.from({ length: n }, (_, i) => `q${i}`) }],
+      });
+    }
+
+    it('sorteia exatamente N pesquisas sem repetir nenhuma', () => {
+      const file = fileWith(50);
+      const result = expandSearches(file, { sampleSize: 10 });
+      expect(result).toHaveLength(10);
+      expect(new Set(result.map((s) => s.query)).size).toBe(10);
+      for (const s of result) expect(s.query).toMatch(/^q\d+$/);
+    });
+
+    it('nunca sorteia a mesma pesquisa duas vezes em execuções sucessivas do sorteio', () => {
+      const file = fileWith(20);
+      // Sorteia repetidas vezes e confere que cada resultado individual nunca
+      // repete um item — a garantia é "sem repetir DENTRO de uma execução",
+      // não que sorteios diferentes deem listas diferentes.
+      for (let i = 0; i < 25; i += 1) {
+        const result = expandSearches(file, { sampleSize: 7 });
+        expect(new Set(result.map((s) => s.query)).size).toBe(7);
+      }
+    });
+
+    it('sampleSize maior ou igual ao total devolve tudo, sem lançar', () => {
+      const file = fileWith(5);
+      expect(expandSearches(file, { sampleSize: 5 })).toHaveLength(5);
+      expect(expandSearches(file, { sampleSize: 999 })).toHaveLength(5);
+    });
+
+    it('sem sampleSize mantém o comportamento de sempre: todas, na ordem do arquivo', () => {
+      const file = fileWith(5);
+      expect(expandSearches(file).map((s) => s.query)).toEqual(['q0', 'q1', 'q2', 'q3', 'q4']);
+    });
+
+    it('combina com o filtro por tema — sorteia dentro do subconjunto já filtrado', () => {
+      const file = parse({
+        ...base,
+        themes: [
+          { id: 't1', name: 'A', queries: ['a1', 'a2', 'a3'] },
+          { id: 't2', name: 'B', queries: ['b1', 'b2', 'b3'] },
+        ],
+      });
+      const result = expandSearches(file, { themeIds: ['t1'], sampleSize: 2 });
+      expect(result).toHaveLength(2);
+      for (const s of result) expect(s.query.startsWith('a')).toBe(true);
+    });
+  });
 });

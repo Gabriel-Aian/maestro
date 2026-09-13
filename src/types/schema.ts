@@ -361,6 +361,8 @@ export const ScheduleTargetSchema = z.discriminatedUnion('kind', [
     kind: z.literal('search'),
     searchFile: z.string().min(1),
     themeIds: z.array(z.string()).optional(),
+    /** Sorteia esse número de pesquisas do total já filtrado, sem repetir dentro do disparo — omitido roda todas. */
+    sampleSize: z.number().int().positive().optional(),
   }),
 ]);
 export type ScheduleTarget = z.infer<typeof ScheduleTargetSchema>;

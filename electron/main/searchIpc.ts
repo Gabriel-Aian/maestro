@@ -67,12 +67,15 @@ export function registerSearchIpcHandlers(): void {
     shell.showItemInFolder(filePath);
   });
 
-  ipcMain.handle('maestro:search:run', (_event, input: { filePath: string; themeIds: string[] }): RunSearchResult => {
-    try {
-      const jobs = getMaestro().enqueueSearches(input.filePath, { themeIds: input.themeIds });
-      return { ok: true, jobIds: jobs.map((j) => j.id) };
-    } catch (err) {
-      return { ok: false, reason: formatError(err) };
-    }
-  });
+  ipcMain.handle(
+    'maestro:search:run',
+    (_event, input: { filePath: string; themeIds: string[]; sampleSize?: number }): RunSearchResult => {
+      try {
+        const jobs = getMaestro().enqueueSearches(input.filePath, { themeIds: input.themeIds, sampleSize: input.sampleSize });
+        return { ok: true, jobIds: jobs.map((j) => j.id) };
+      } catch (err) {
+        return { ok: false, reason: formatError(err) };
+      }
+    },
+  );
 }

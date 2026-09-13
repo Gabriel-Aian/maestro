@@ -29,4 +29,16 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-publish: null
+# Canal de auto-update (RF pedido pelo usuário) — GitHub Releases público,
+# decisão explícita dele: sem certificado de assinatura de código, um canal
+# privado exigiria embutir um token de leitura dentro do próprio instalador
+# distribuído, legível por qualquer um que o abra. Publicar de verdade é
+# sempre manual (`npm run package:win:publish`, exige `GH_TOKEN` no
+# ambiente) — `npm run package:win` continua com `--publish=never`, nunca
+# publica como efeito colateral de um build comum. Ver "Auto-update" no
+# CLAUDE.md para o restante (o que isso NÃO resolve sozinho, e o que falta
+# para o repositório/releases ficarem de fato públicos no GitHub).
+publish:
+  provider: github
+  owner: Gabriel-Aian
+  repo: maestro
