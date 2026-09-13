@@ -61,6 +61,16 @@ export const FrameRefSchema = z.object({
 });
 export type FrameRef = z.infer<typeof FrameRefSchema>;
 
+/**
+ * Faixa [min, max] em ms para sorteio uniforme de um atraso — nunca um valor
+ * fixo (RN-008). Reaproveitada em três granularidades: configuração global,
+ * fluxo e passo (delay entre passos), e pesquisas (delay entre buscas).
+ */
+export const DelayRangeSchema = z
+  .tuple([z.number().int().min(0), z.number().int().min(0)])
+  .refine(([min, max]) => min <= max, { message: 'faixa de delay: min precisa ser <= max' });
+export type DelayRange = z.infer<typeof DelayRangeSchema>;
+
 /* ─────────────────────────  PASSOS DE FLUXO  ───────────────────────── */
 
 const stepBase = {
@@ -78,6 +88,14 @@ const stepBase = {
    * foi gravado, passar por ela de novo é esperado, não sessão expirada.
    */
   observedUrl: z.string().optional(),
+  /**
+   * Intervalo bruto (ms) observado antes deste passo durante a gravação.
+   * Guardado sempre, independente do limiar usado para gerar `note` (que é só
+   * para leitura humana) — é o que alimenta a conversão em passos reais.
+   */
+  recordedGapMs: z.number().int().min(0).optional(),
+  /** Delay antes deste passo especificamente, sobrepondo fluxo e global. */
+  delayMs: DelayRangeSchema.optional(),
 };
 
 const withSelectors = {
@@ -150,21 +168,19 @@ export const FlowSchema = z.object({
   updatedAt: z.string(),
   /** Marcado quando algum passo usou seletor de fallback (RN-006). */
   needsReview: z.boolean().default(false),
+  /** Delay entre passos para todo o fluxo, sobrepondo o padrão global. */
+  stepDelayMs: DelayRangeSchema.optional(),
 });
 export type Flow = z.infer<typeof FlowSchema>;
 
 /* ─────────────────────────  PESQUISAS  ───────────────────────── */
-
-const delayRange = z
-  .tuple([z.number().int().min(0), z.number().int().min(0)])
-  .refine(([min, max]) => min <= max, { message: 'delayBetweenSearchesMs: min precisa ser <= max' });
 
 export const SearchDefaultsSchema = z.object({
   browser: z.string().default('chrome'),
   profile: z.string().optional(),
   engine: z.string().default('google'),
   headless: z.boolean().default(true),
-  delayBetweenSearchesMs: delayRange.default([4_000, 12_000]),
+  delayBetweenSearchesMs: DelayRangeSchema.default([4_000, 12_000]),
   screenshot: z.enum(['none', 'after', 'both']).default('none'),
   maxRetries: z.number().int().min(0).max(5).default(2),
 });
@@ -188,7 +204,7 @@ export const ThemeSchema = z.object({
   profile: z.string().optional(),
   browser: z.string().optional(),
   headless: z.boolean().optional(),
-  delayBetweenSearchesMs: delayRange.optional(),
+  delayBetweenSearchesMs: DelayRangeSchema.optional(),
   screenshot: z.enum(['none', 'after', 'both']).optional(),
   queries: z.array(QuerySchema).min(1),
 });
@@ -292,6 +308,12 @@ export const AppConfigSchema = z.object({
   jobTimeoutMs: z.number().int().positive().default(15 * 60_000),
   /** Ociosidade antes de encerrar navegador reaproveitado (RF-055). */
   browserIdleTtlMs: z.number().int().min(0).default(60_000),
+  /**
+   * Delay padrão entre passos de fluxo, sorteado dentro da faixa (RN-008).
+   * `[0, 0]` (padrão) desliga o recurso — o motor já espera cada elemento
+   * ficar pronto antes de interagir; isto é só para pacing deliberado.
+   */
+  defaultStepDelayMs: DelayRangeSchema.default([0, 0]),
   retention: z
     .object({
       maxAgeDays: z.number().int().positive().default(30),

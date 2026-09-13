@@ -15,7 +15,7 @@ import { createRequire } from 'node:module';
 import { Command } from 'commander';
 import { detectBrowsers, validateBrowserPath } from './browsers/detect.js';
 import { launchProfile, isProfileLocked, openProfilePlain } from './browsers/launcher.js';
-import { RecordingSession } from './recorder/recorder.js';
+import { RecordingSession, materializeTimingSteps, DEFAULT_TIMING_MIN_MS, DEFAULT_TIMING_MAX_MS } from './recorder/recorder.js';
 import { saveFlow, loadFlow, listFlowVersions, restoreFlowVersion } from './store/flowStore.js';
 import { loadSearchFile, validateSearchFile, expandSearches } from './search/searchFile.js';
 import { replayFlow } from './engine/replay.js';
@@ -230,7 +230,10 @@ program
   .description('Grava um fluxo de navegação (RF-021 a RF-030)')
   .requiredOption('-u, --url <url>', 'URL inicial')
   .requiredOption('-p, --profile <name>', 'perfil a usar')
-  .action(async (name: string, opts: { url: string; profile: string }) => {
+  .option('--convert-timings', 'converte os intervalos observados na gravação em passos waitForTimeout reais')
+  .option('--min-ms <n>', `limiar mínimo para converter um intervalo (padrão ${DEFAULT_TIMING_MIN_MS}ms)`)
+  .option('--max-ms <n>', `teto aplicado ao intervalo convertido (padrão ${DEFAULT_TIMING_MAX_MS}ms)`)
+  .action(async (name: string, opts: { url: string; profile: string; convertTimings?: boolean; minMs?: string; maxMs?: string }) => {
     const p = profiles.find(opts.profile);
     if (!p) fail(`Perfil "${opts.profile}" não encontrado.`);
 
@@ -255,7 +258,13 @@ program
 
     try {
       const flow = await session.stop();
-      const saved = saveFlow(flow);
+      const steps = opts.convertTimings
+        ? materializeTimingSteps(flow.steps, {
+            minMs: opts.minMs !== undefined ? Number(opts.minMs) : undefined,
+            maxMs: opts.maxMs !== undefined ? Number(opts.maxMs) : undefined,
+          })
+        : flow.steps;
+      const saved = saveFlow({ ...flow, steps });
       ok(`Fluxo "${saved.name}" salvo como ${saved.id} (${saved.steps.length} passos).`);
       info(`  Arquivo: ${paths.flowFile(saved.id)}`);
       info(`  Teste antes de agendar: maestro flow run ${saved.id} -p ${opts.profile} --headed`);
@@ -343,6 +352,31 @@ flow
   .action((id: string, version: string) => {
     const restored = restoreFlowVersion(id, version);
     ok(`Fluxo ${id} restaurado para ${version} (${restored.steps.length} passos).`);
+  });
+
+flow
+  .command('convert-timings <id>')
+  .description('Converte os intervalos já gravados em passos waitForTimeout reais')
+  .option('--min-ms <n>', `limiar mínimo para converter um intervalo (padrão ${DEFAULT_TIMING_MIN_MS}ms)`)
+  .option('--max-ms <n>', `teto aplicado ao intervalo convertido (padrão ${DEFAULT_TIMING_MAX_MS}ms)`)
+  .action((id: string, opts: { minMs?: string; maxMs?: string }) => {
+    const flow = loadFlow(id);
+    const steps = materializeTimingSteps(flow.steps, {
+      minMs: opts.minMs !== undefined ? Number(opts.minMs) : undefined,
+      maxMs: opts.maxMs !== undefined ? Number(opts.maxMs) : undefined,
+    });
+    const inserted = steps.length - flow.steps.length;
+    if (inserted === 0) {
+      return info(
+        'Nada para converter: nenhum passo tem intervalo bruto pendente acima do limiar. ' +
+          'Isso vale tanto para fluxos já convertidos quanto para fluxos gravados antes deste ' +
+          'recurso existir (regrave para capturar o valor preciso).',
+      );
+    }
+
+    const saved = saveFlow({ ...flow, steps });
+    ok(`${inserted} passo(s) waitForTimeout inserido(s) no fluxo "${saved.name}" (${saved.steps.length} passos no total).`);
+    info(`  Versão anterior preservada — veja "maestro flow versions ${id}".`);
   });
 
 /* ─────────────────────────  PESQUISAS  ───────────────────────── */

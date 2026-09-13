@@ -97,6 +97,23 @@ describe('compileEvents — limpeza da gravação bruta', () => {
     ]);
 
     expect(steps[1]!.note).toContain('8s');
+    expect(steps[1]!.recordedGapMs).toBe(8000);
+  });
+
+  it('guarda o intervalo bruto mesmo abaixo do limiar usado para a nota', () => {
+    const steps = compileEvents([
+      ev({ kind: 'click', id: 'a', t: 1000 }),
+      ev({ kind: 'click', id: 'b', t: 1500 }),
+    ]);
+
+    expect(steps[1]!.note).toBeUndefined();
+    expect(steps[1]!.recordedGapMs).toBe(500);
+  });
+
+  it('não guarda intervalo bruto no primeiro passo, que não tem antecessor', () => {
+    const steps = compileEvents([ev({ kind: 'click', id: 'a', t: 1000 })]);
+
+    expect(steps[0]!.recordedGapMs).toBeUndefined();
   });
 
   it('reindexa os passos sequencialmente após as remoções', () => {

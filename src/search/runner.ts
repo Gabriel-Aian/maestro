@@ -4,6 +4,7 @@ import type { AppConfig, ResolvedSearch, RunResult, StepResult } from '../types/
 import { getEngine } from './engines.js';
 import { detectBlock } from '../engine/blockDetection.js';
 import { RunArtifacts } from '../engine/artifacts.js';
+import { randomDelay } from '../engine/timing.js';
 import { runLogger } from '../logger.js';
 
 export interface SearchBatchOptions {
@@ -15,11 +16,6 @@ export interface SearchBatchOptions {
   submitMode?: 'url' | 'type';
   signal?: AbortSignal;
   onProgress?: (done: number, total: number, search: ResolvedSearch, status: string) => void;
-}
-
-/** Sorteio uniforme dentro da faixa configurada — nunca fixo (RN-008). */
-function randomDelay([min, max]: [number, number]): number {
-  return Math.floor(min + Math.random() * (max - min + 1));
 }
 
 /**
