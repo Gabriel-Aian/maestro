@@ -6,6 +6,7 @@ import { registerIpcHandlers } from './ipc.js';
 import { registerProfileIpcHandlers } from './profilesIpc.js';
 import { registerFlowIpcHandlers } from './flowsIpc.js';
 import { registerSearchIpcHandlers } from './searchIpc.js';
+import { registerScheduleIpcHandlers } from './schedulesIpc.js';
 
 const dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -52,6 +53,7 @@ app.whenReady().then(async () => {
   registerProfileIpcHandlers();
   registerFlowIpcHandlers();
   registerSearchIpcHandlers();
+  registerScheduleIpcHandlers();
 
   createWindow();
 

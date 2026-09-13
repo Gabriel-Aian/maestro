@@ -188,47 +188,63 @@ export class Maestro {
   /* ─────────────────────────  EXECUÇÃO  ───────────────────────── */
 
   private async handle(job: Job, signal: AbortSignal): Promise<RunResult> {
-    const profile = profiles.find(job.profileId);
-    if (!profile) throw new Error(`Perfil ${job.profileId} desapareceu antes da execução.`);
-
-    const executablePath = this.resolveExecutable(profile.browserId);
-    const runId = `run-${new Date().toISOString().slice(0, 10)}-${randomUUID().slice(0, 6)}`;
-
-    let context: BrowserContext;
     try {
-      context = await this.pool.acquire({
-        profile,
-        executablePath,
-        headless: job.headless,
-        viewport: this.config.defaultViewport,
-      });
-    } catch (err) {
-      if (err instanceof ProfileLockedError) {
-        // Perfil travado não é falha recuperável por retry (RN-002).
-        logger.error({ profile: profile.name }, 'Perfil em uso por outra instância');
+      const profile = profiles.find(job.profileId);
+      if (!profile) throw new Error(`Perfil ${job.profileId} desapareceu antes da execução.`);
+
+      const executablePath = this.resolveExecutable(profile.browserId);
+      const runId = `run-${new Date().toISOString().slice(0, 10)}-${randomUUID().slice(0, 6)}`;
+
+      let context: BrowserContext;
+      try {
+        context = await this.pool.acquire({
+          profile,
+          executablePath,
+          headless: job.headless,
+          viewport: this.config.defaultViewport,
+        });
+      } catch (err) {
+        if (err instanceof ProfileLockedError) {
+          // Perfil travado não é falha recuperável por retry (RN-002).
+          logger.error({ profile: profile.name }, 'Perfil em uso por outra instância');
+        }
+        throw err;
       }
+
+      profiles.touch(profile.id);
+
+      try {
+        const result =
+          job.kind === 'flow'
+            ? await this.runFlowJob(job, context, runId)
+            : await runSearchBatch({
+                searches: (job.payload as SearchJobPayload).searches,
+                context,
+                config: this.config,
+                runId,
+                signal,
+              });
+
+        this.recordOutcome(job, profile, result);
+        return result;
+      } finally {
+        this.pool.release(profile.id, job.headless);
+      }
+    } catch (err) {
+      // Um job de agendamento pode lançar antes de produzir um RunResult
+      // (perfil travado, navegador não detectado, timeout) — nesses casos
+      // `recordOutcome` nunca roda, e sem isto aqui o agendamento ficaria
+      // marcado como "nunca rodou" para sempre, mesmo disparando (e
+      // falhando) a cada tick, sem forma de o usuário perceber.
+      this.recordScheduleFailure(job, signal);
       throw err;
     }
+  }
 
-    profiles.touch(profile.id);
-
-    try {
-      const result =
-        job.kind === 'flow'
-          ? await this.runFlowJob(job, context, runId)
-          : await runSearchBatch({
-              searches: (job.payload as SearchJobPayload).searches,
-              context,
-              config: this.config,
-              runId,
-              signal,
-            });
-
-      this.recordOutcome(job, profile, result);
-      return result;
-    } finally {
-      this.pool.release(profile.id, job.headless);
-    }
+  private recordScheduleFailure(job: Job, signal: AbortSignal): void {
+    const scheduleId = (job.payload as { scheduleId?: string }).scheduleId;
+    if (!scheduleId) return;
+    schedules.recordRun(scheduleId, { at: new Date().toISOString(), status: signal.aborted ? 'cancelled' : 'failed' });
   }
 
   private async runFlowJob(job: Job, context: BrowserContext, runId: string): Promise<RunResult> {

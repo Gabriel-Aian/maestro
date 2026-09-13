@@ -196,3 +196,58 @@ export type LoadSearchFileResult =
   | { ok: false; filePath: string; reason: string; issues?: SearchValidationIssue[] };
 
 export type RunSearchResult = { ok: true; jobIds: string[] } | { ok: false; reason: string };
+
+/* ─────────────────────────  AGENDAMENTOS  ───────────────────────── */
+
+export interface ScheduleFlowTargetView {
+  kind: 'flow';
+  flowId: string;
+  flowName: string;
+  profileId: string;
+  profileName: string;
+  variables: Record<string, string>;
+}
+
+export interface ScheduleSearchTargetView {
+  kind: 'search';
+  searchFile: string;
+  /** null = todos os temas habilitados no arquivo, reavaliado a cada disparo. */
+  themeIds: string[] | null;
+}
+
+export type ScheduleTargetView = ScheduleFlowTargetView | ScheduleSearchTargetView;
+
+export interface ScheduleView {
+  id: string;
+  name: string;
+  cron: string;
+  enabled: boolean;
+  target: ScheduleTargetView;
+  /** Calculado a partir do cron no momento da consulta — não é persistido. */
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  lastStatus: string | null;
+}
+
+export type CreateScheduleInput = {
+  name: string;
+  cron: string;
+  target:
+    | { kind: 'flow'; flowId: string; profileId: string; variables: Record<string, string> }
+    | { kind: 'search'; searchFile: string; themeIds: string[] | null };
+};
+
+export type CreateScheduleResult = { ok: true; schedule: ScheduleView } | { ok: false; reason: string };
+
+export type RunScheduleResult = { ok: true; jobIds: string[] } | { ok: false; reason: string };
+
+/** Reaproveita SearchThemeView: mesmo formato usado pela tela de Pesquisas para listar temas de um arquivo. */
+export type PickScheduleSearchFileResult = { ok: true; filePath: string; themes: SearchThemeView[] } | { ok: false; reason: string };
+
+/**
+ * A tarefa do Agendador do Windows não roda de verdade neste ambiente de
+ * desenvolvimento (Linux) — `ok: false` aqui é o caminho esperado ao rodar
+ * fora do Windows, não necessariamente um erro do usuário.
+ */
+export type WindowsTaskStatusResult = { ok: true; installed: boolean; raw?: string } | { ok: false; reason: string };
+export type WindowsTaskActionResult = { ok: true } | { ok: false; reason: string };

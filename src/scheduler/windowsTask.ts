@@ -35,9 +35,24 @@ export interface InstallTaskOptions {
   cliPath?: string;
 }
 
-/** Monta a linha de comando que a tarefa do Windows vai executar a cada tick. */
+/**
+ * Monta a linha de comando que a tarefa do Windows vai executar a cada tick.
+ *
+ * O default de `nodePath` NÃO pode ser `process.execPath`: essa função é
+ * chamada tanto pela CLI (`node dist/cli.js schedule install-task`, onde
+ * `process.execPath` de fato aponta para o `node`) quanto pela casca Electron
+ * (`electron/main/schedulesIpc.ts`), onde `process.execPath` aponta para o
+ * próprio executável do Electron — um binário completamente diferente, que
+ * não sabe interpretar um caminho de script como primeiro argumento. O nome
+ * puro `"node"` funciona nos dois casos, porque o `schtasks` resolve
+ * executáveis sem caminho pela PATH do Windows, exatamente como digitar
+ * `node ...` num terminal — e `node` na PATH já é pré-requisito do projeto
+ * inteiro (`npm install`, `npm run build`). Mesmo raciocínio não se aplica a
+ * `cliPath`: `process.argv[1]` só é confiável quando quem chama é a própria
+ * CLI — a Electron passa sempre um `cliPath` explícito.
+ */
 export function buildTickCommand(opts: { nodePath?: string; cliPath?: string } = {}): string {
-  const node = opts.nodePath ?? process.execPath;
+  const node = opts.nodePath ?? 'node';
   const cli = opts.cliPath ?? resolve(process.argv[1] ?? 'dist/cli.js');
   return `"${node}" "${cli}" schedule tick`;
 }

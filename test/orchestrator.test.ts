@@ -3,8 +3,9 @@ import { writeFileSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Maestro } from '../src/orchestrator.js';
-import { profiles, getDb } from '../src/db/index.js';
-import { AppConfigSchema, type ProfileStatus } from '../src/types/schema.js';
+import { profiles, schedules, getDb } from '../src/db/index.js';
+import { saveFlow } from '../src/store/flowStore.js';
+import { AppConfigSchema, ScheduleSchema, type ProfileStatus } from '../src/types/schema.js';
 
 /**
  * `enqueueSearches` agrupa pesquisas por perfil e enfileira um job por grupo.
@@ -16,6 +17,7 @@ import { AppConfigSchema, type ProfileStatus } from '../src/types/schema.js';
 beforeEach(() => {
   getDb().exec('DELETE FROM jobs');
   getDb().exec('DELETE FROM profiles');
+  getDb().exec('DELETE FROM schedules');
 });
 
 function seedProfile(id: string, name: string, status: ProfileStatus = 'authenticated'): void {
@@ -76,5 +78,53 @@ describe('Maestro.enqueueSearches — atomicidade por perfil (RN-004, mesmo prin
     expect(jobs).toHaveLength(2);
     const count = getDb().prepare('SELECT COUNT(*) AS n FROM jobs').get() as { n: number };
     expect(count.n).toBe(2);
+  });
+});
+
+/**
+ * `recordOutcome` (que grava `schedules.lastRunAt`/`lastStatus`) só roda
+ * depois que o handler do job devolve um RunResult. Um job pode lançar ANTES
+ * disso — perfil travado, navegador não detectado (o caso testado aqui, já
+ * que este ambiente não tem Chromium instalado) — e sem o fix em
+ * `Maestro.handle()` o agendamento ficava "nunca rodou" para sempre, mesmo
+ * falhando a cada tick.
+ */
+describe('Maestro — agendamento registra falha mesmo quando o job lança antes de um RunResult', () => {
+  it('grava lastStatus "failed" quando o navegador do perfil não é detectado', async () => {
+    seedProfile('prof-1', 'conta-1');
+    const now = new Date().toISOString();
+    saveFlow({
+      schemaVersion: 1,
+      id: 'flow-teste',
+      name: 'Fluxo de teste',
+      startUrl: 'https://example.com/',
+      viewport: { width: 1366, height: 768 },
+      variables: [],
+      steps: [{ index: 0, type: 'navigate', url: 'https://example.com/' }],
+      createdAt: now,
+      updatedAt: now,
+      needsReview: false,
+    });
+
+    const schedule = ScheduleSchema.parse({
+      id: 'sched-teste',
+      name: 'Agendamento de teste',
+      cron: '0 9 * * *',
+      enabled: true,
+      target: { kind: 'flow', flowId: 'flow-teste', profile: 'conta-1', variables: {} },
+      createdAt: now,
+      updatedAt: now,
+    });
+    schedules.insert(schedule);
+
+    const maestro = new Maestro(AppConfigSchema.parse({}));
+    await maestro.init();
+    maestro.enqueueSchedule(schedule);
+    await maestro.queue.waitForIdle();
+    await maestro.shutdown();
+
+    const updated = schedules.find('sched-teste');
+    expect(updated?.lastStatus).toBe('failed');
+    expect(updated?.lastRunAt).not.toBeNull();
   });
 });

@@ -5,6 +5,8 @@ import {
   type ActionResult,
   type AddProfileResult,
   type BrowserView,
+  type CreateScheduleInput,
+  type CreateScheduleResult,
   type FlowDetailView,
   type FlowListItem,
   type FlowRunDetail,
@@ -12,13 +14,18 @@ import {
   type HistoryRunView,
   type LoadSearchFileResult,
   type LoginCheckResult,
+  type PickScheduleSearchFileResult,
   type ProfileView,
   type ProfilesEvent,
   type QueueEvent,
   type QueueJobView,
   type RunFlowResult,
+  type RunScheduleResult,
   type RunSearchResult,
+  type ScheduleView,
   type StatusView,
+  type WindowsTaskActionResult,
+  type WindowsTaskStatusResult,
 } from '../shared/ipc.js';
 
 /** Assina um canal de evento e devolve a função de cancelamento — chamar ao desmontar. */
@@ -70,6 +77,20 @@ const api = {
   openSearchFileFolder: (filePath: string): Promise<void> => ipcRenderer.invoke('maestro:search:openFolder', filePath),
   runSearch: (filePath: string, themeIds: string[]): Promise<RunSearchResult> =>
     ipcRenderer.invoke('maestro:search:run', { filePath, themeIds }),
+
+  listSchedules: (): Promise<ScheduleView[]> => ipcRenderer.invoke('maestro:schedules:list'),
+  pickScheduleSearchFile: (): Promise<PickScheduleSearchFileResult | null> => ipcRenderer.invoke('maestro:schedules:pickSearchFile'),
+  createSchedule: (input: CreateScheduleInput): Promise<CreateScheduleResult> => ipcRenderer.invoke('maestro:schedules:create', input),
+  setScheduleEnabled: (id: string, enabled: boolean): Promise<ActionResult> =>
+    ipcRenderer.invoke('maestro:schedules:setEnabled', { id, enabled }),
+  removeSchedule: (id: string): Promise<void> => ipcRenderer.invoke('maestro:schedules:remove', id),
+  runSchedule: (id: string): Promise<RunScheduleResult> => ipcRenderer.invoke('maestro:schedules:run', id),
+  getTaskStatus: (): Promise<WindowsTaskStatusResult> => ipcRenderer.invoke('maestro:schedules:taskStatus'),
+  installTask: (intervalMinutes: number): Promise<WindowsTaskActionResult> =>
+    ipcRenderer.invoke('maestro:schedules:installTask', intervalMinutes),
+  uninstallTask: (): Promise<WindowsTaskActionResult> => ipcRenderer.invoke('maestro:schedules:uninstallTask'),
+  previewInstallCommand: (intervalMinutes: number): Promise<string> =>
+    ipcRenderer.invoke('maestro:schedules:previewInstallCommand', intervalMinutes),
 };
 
 contextBridge.exposeInMainWorld('maestro', api);

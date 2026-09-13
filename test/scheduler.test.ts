@@ -143,6 +143,20 @@ describe('windowsTask — construção de comando (sem executar nada)', () => {
     expect(args).toEqual(['/create', '/f', '/tn', TICK_TASK_NAME, '/tr', '"node" "cli.js" schedule tick', '/sc', 'minute', '/mo', '5', '/rl', 'limited']);
   });
 
+  /**
+   * `process.execPath` NÃO pode ser o default de `nodePath`: quem chama
+   * `buildTickCommand` nem sempre é a CLI — a casca Electron também chama
+   * (`electron/main/schedulesIpc.ts`, botão "Instalar tarefa"), e ali
+   * `process.execPath` aponta para o executável do Electron, não para o
+   * `node`. Um comando assim nunca teria rodado de verdade. `"node"` puro
+   * funciona nos dois casos via resolução por PATH do Windows.
+   */
+  it('usa "node" (resolvido pela PATH), nunca process.execPath, quando nodePath não é informado', () => {
+    const command = buildTickCommand({ cliPath: 'C:\\maestro\\dist\\cli.js' });
+    expect(command).toBe('"node" "C:\\maestro\\dist\\cli.js" schedule tick');
+    expect(command).not.toContain(process.execPath);
+  });
+
   it('recusa instalar de verdade fora do Windows (R-01)', async () => {
     await expect(installWindowsTask({ intervalMinutes: 5 })).rejects.toThrow(/Windows/);
   });
