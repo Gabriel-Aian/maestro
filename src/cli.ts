@@ -24,6 +24,7 @@ import { loadConfig, saveConfig } from './config/config.js';
 import { profiles, flowsIndex, runs, schedules, getDb } from './db/index.js';
 import { paths, ensureDataDirs } from './config/paths.js';
 import { ProfileSchema, ScheduleSchema, type ScheduleTarget } from './types/schema.js';
+import { formatError } from './errors.js';
 import { runDueSchedules } from './scheduler/scheduler.js';
 import { installWindowsTask, uninstallWindowsTask, windowsTaskStatus, buildInstallArgs, TICK_TASK_NAME } from './scheduler/windowsTask.js';
 import { createTask } from 'node-cron';
@@ -272,7 +273,7 @@ program
       info(`  Arquivo: ${paths.flowFile(saved.id)}`);
       info(`  Teste antes de agendar: maestro flow run ${saved.id} -p ${opts.profile} --headed`);
     } catch (err) {
-      fail(err instanceof Error ? err.message : String(err));
+      fail(formatError(err));
     } finally {
       await context.close();
       await maestro.shutdown();
@@ -399,7 +400,7 @@ search
       for (const s of expanded) byTheme.set(s.themeName, (byTheme.get(s.themeName) ?? 0) + 1);
       for (const [theme, count] of byTheme) info(`  ${theme.padEnd(24)} ${count}`);
     } catch (err) {
-      fail(err instanceof Error ? err.message : String(err));
+      fail(formatError(err));
     }
   });
 
@@ -495,7 +496,7 @@ schedule
           updatedAt: now,
         });
       } catch (err) {
-        fail(err instanceof Error ? err.message : String(err));
+        fail(formatError(err));
       }
 
       schedules.insert(saved);
@@ -619,7 +620,7 @@ schedule
       info('  Não testado contra um Agendador de Tarefas real neste ambiente de desenvolvimento (R-01) —');
       info('  confirme com "maestro schedule task-status" e, se algo não bater, "schedule install-task --dry-run".');
     } catch (err) {
-      fail(err instanceof Error ? err.message : String(err));
+      fail(formatError(err));
     }
   });
 
@@ -631,7 +632,7 @@ schedule
       await uninstallWindowsTask();
       ok('Tarefa removida do Agendador de Tarefas do Windows.');
     } catch (err) {
-      fail(err instanceof Error ? err.message : String(err));
+      fail(formatError(err));
     }
   });
 
@@ -645,7 +646,7 @@ schedule
       ok('Tarefa registrada.');
       if (status.raw) info(status.raw);
     } catch (err) {
-      fail(err instanceof Error ? err.message : String(err));
+      fail(formatError(err));
     }
   });
 
@@ -790,5 +791,5 @@ async function runInteractive(flowId: string, profileName: string, variables: Re
 }
 
 program.parseAsync(process.argv).catch((err: unknown) => {
-  fail(err instanceof Error ? err.message : String(err));
+  fail(formatError(err));
 });

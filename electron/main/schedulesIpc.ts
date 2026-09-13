@@ -8,6 +8,7 @@ import {
   buildInstallArgs,
   expandSearches,
   flowsIndex,
+  formatError,
   installWindowsTask,
   loadFlow,
   loadSearchFile,
@@ -129,7 +130,7 @@ export function registerScheduleIpcHandlers(): void {
         themes: file.themes.map((t) => ({ id: t.id, name: t.name, enabled: t.enabled, queryCount: counts.get(t.id) ?? 0 })),
       };
     } catch (err) {
-      return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+      return { ok: false, reason: formatError(err) };
     }
   });
 
@@ -159,7 +160,7 @@ export function registerScheduleIpcHandlers(): void {
       schedules.insert(saved);
       return { ok: true, schedule: toScheduleView(saved, profiles.list(), flowsIndex.list()) };
     } catch (err) {
-      return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+      return { ok: false, reason: formatError(err) };
     }
   });
 
@@ -180,7 +181,7 @@ export function registerScheduleIpcHandlers(): void {
       const jobs = getMaestro().enqueueSchedule(s);
       return { ok: true, jobIds: jobs.map((j) => j.id) };
     } catch (err) {
-      return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+      return { ok: false, reason: formatError(err) };
     }
   });
 
@@ -188,7 +189,7 @@ export function registerScheduleIpcHandlers(): void {
     try {
       return { ok: true, ...(await windowsTaskStatus()) };
     } catch (err) {
-      return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+      return { ok: false, reason: formatError(err) };
     }
   });
 
@@ -197,7 +198,7 @@ export function registerScheduleIpcHandlers(): void {
       await installWindowsTask({ intervalMinutes, cliPath });
       return { ok: true };
     } catch (err) {
-      return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+      return { ok: false, reason: formatError(err) };
     }
   });
 
@@ -206,7 +207,7 @@ export function registerScheduleIpcHandlers(): void {
       await uninstallWindowsTask();
       return { ok: true };
     } catch (err) {
-      return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+      return { ok: false, reason: formatError(err) };
     }
   });
 

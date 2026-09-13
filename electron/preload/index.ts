@@ -4,6 +4,7 @@ import {
   QUEUE_EVENT_CHANNEL,
   type ActionResult,
   type AddProfileResult,
+  type AppConfigView,
   type BrowserView,
   type CreateScheduleInput,
   type CreateScheduleResult,
@@ -24,6 +25,7 @@ import {
   type RunSearchResult,
   type ScheduleView,
   type StatusView,
+  type UpdateConfigResult,
   type WindowsTaskActionResult,
   type WindowsTaskStatusResult,
 } from '../shared/ipc.js';
@@ -91,6 +93,10 @@ const api = {
   uninstallTask: (): Promise<WindowsTaskActionResult> => ipcRenderer.invoke('maestro:schedules:uninstallTask'),
   previewInstallCommand: (intervalMinutes: number): Promise<string> =>
     ipcRenderer.invoke('maestro:schedules:previewInstallCommand', intervalMinutes),
+
+  getConfig: (): Promise<AppConfigView> => ipcRenderer.invoke('maestro:config:get'),
+  getDefaultConfig: (): Promise<AppConfigView> => ipcRenderer.invoke('maestro:config:defaults'),
+  updateConfig: (config: AppConfigView): Promise<UpdateConfigResult> => ipcRenderer.invoke('maestro:config:update', config),
 };
 
 contextBridge.exposeInMainWorld('maestro', api);

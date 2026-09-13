@@ -1,5 +1,5 @@
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron';
-import { SearchFileInvalidError, expandSearches, loadSearchFile, type SearchFile } from '../../src/index.js';
+import { SearchFileInvalidError, expandSearches, formatError, loadSearchFile, type SearchFile } from '../../src/index.js';
 import { getMaestro } from './maestro.js';
 import { loadPrefs, savePrefs } from './prefs.js';
 import type { LoadSearchFileResult, RunSearchResult, SearchFileView } from '../shared/ipc.js';
@@ -36,7 +36,7 @@ function tryLoad(filePath: string): LoadSearchFileResult {
       const reason = err.message.split('\n')[0] ?? err.message;
       return { ok: false, filePath, reason, issues: err.issues };
     }
-    return { ok: false, filePath, reason: err instanceof Error ? err.message : String(err) };
+    return { ok: false, filePath, reason: formatError(err) };
   }
 }
 
@@ -72,7 +72,7 @@ export function registerSearchIpcHandlers(): void {
       const jobs = getMaestro().enqueueSearches(input.filePath, { themeIds: input.themeIds });
       return { ok: true, jobIds: jobs.map((j) => j.id) };
     } catch (err) {
-      return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+      return { ok: false, reason: formatError(err) };
     }
   });
 }

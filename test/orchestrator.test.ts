@@ -128,3 +128,33 @@ describe('Maestro — agendamento registra falha mesmo quando o job lança antes
     expect(updated?.lastRunAt).not.toBeNull();
   });
 });
+
+/**
+ * A tela de Configurações edita uma instância de `Maestro` de vida longa
+ * (a da GUI), não um processo novo por comando como a CLI. `updateConfig`
+ * precisa refletir na hora: `this.config` é mutado em vez de substituído
+ * (para quem já leu essa referência ver a mudança), e `browserPaths` é
+ * recalculado — sem isso, um caminho manual cadastrado pela GUI só valeria
+ * depois de reiniciar o app (era exatamente o bug do botão "Registrar
+ * caminho" da tela de Perfis antes desta correção).
+ */
+describe('Maestro.updateConfig — reflete na instância em memória, não só no disco', () => {
+  it('muda um campo lido ao vivo (defaultHeadless) sem precisar de uma nova instância', async () => {
+    const maestro = new Maestro(AppConfigSchema.parse({ defaultHeadless: true }));
+    await maestro.init();
+
+    await maestro.updateConfig({ ...maestro.config, defaultHeadless: false });
+
+    expect(maestro.config.defaultHeadless).toBe(false);
+  });
+
+  it('recalcula browserPaths na hora, sem esperar reinício', async () => {
+    const maestro = new Maestro(AppConfigSchema.parse({}));
+    await maestro.init();
+    expect(() => maestro.resolveExecutable('navegador-fake')).toThrow(/não foi detectado/);
+
+    await maestro.updateConfig({ ...maestro.config, browserPaths: { 'navegador-fake': '/caminho/fake' } });
+
+    expect(maestro.resolveExecutable('navegador-fake')).toBe('/caminho/fake');
+  });
+});

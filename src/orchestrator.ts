@@ -9,9 +9,9 @@ import { runSearchBatch } from './search/runner.js';
 import { loadFlow } from './store/flowStore.js';
 import { expandSearches, loadSearchFile } from './search/searchFile.js';
 import { flowsIndex, profiles, runs, schedules } from './db/index.js';
-import { loadConfig } from './config/config.js';
+import { loadConfig, saveConfig } from './config/config.js';
 import { logger } from './logger.js';
-import type { AppConfig, Profile, ResolvedSearch, RunResult, Schedule } from './types/schema.js';
+import { AppConfigSchema, type AppConfig, type Profile, type ResolvedSearch, type RunResult, type Schedule } from './types/schema.js';
 
 export interface FlowJobPayload extends Record<string, unknown> {
   flowId: string;
@@ -47,10 +47,7 @@ export class Maestro {
   }
 
   async init(): Promise<void> {
-    const detected = await detectBrowsers();
-    for (const browser of detected) this.browserPaths.set(browser.id, browser.executablePath);
-    // Caminhos manuais têm precedência sobre a detecção automática.
-    for (const [id, path] of Object.entries(this.config.browserPaths)) this.browserPaths.set(id, path);
+    await this.refreshBrowserPaths();
     this.queue.start();
   }
 
@@ -63,6 +60,33 @@ export class Maestro {
   async killAll(): Promise<void> {
     await this.queue.killAll();
     await this.pool.closeAll();
+  }
+
+  private async refreshBrowserPaths(): Promise<void> {
+    const detected = await detectBrowsers();
+    this.browserPaths.clear();
+    for (const browser of detected) this.browserPaths.set(browser.id, browser.executablePath);
+    // Caminhos manuais têm precedência sobre a detecção automática.
+    for (const [id, path] of Object.entries(this.config.browserPaths)) this.browserPaths.set(id, path);
+  }
+
+  /**
+   * Atualiza a configuração em disco E em memória, para uma instância de
+   * `Maestro` de vida longa (a da GUI) refletir a mudança sem reiniciar.
+   * `this.config` é MUTADO no próprio objeto, não substituído por um novo —
+   * é assim (por referência) que `enqueueFlow`/`handle`/`cleanupArtifacts`
+   * etc. leem `this.config.X` "ao vivo" a cada chamada. As exceções são
+   * `maxConcurrentBrowsers`/`jobTimeoutMs`/`jobDelayMs` (congelados dentro de
+   * `JobQueue` na construção) e `browserIdleTtlMs` (congelado em
+   * `BrowserPool`) — persistem em disco normalmente, mas só valem de fato
+   * depois de reiniciar o app; quem chama isso precisa avisar o usuário.
+   */
+  async updateConfig(next: AppConfig): Promise<AppConfig> {
+    const parsed = AppConfigSchema.parse(next);
+    saveConfig(parsed);
+    Object.assign(this.config, parsed);
+    await this.refreshBrowserPaths();
+    return this.config;
   }
 
   resolveExecutable(browserId: string): string {
