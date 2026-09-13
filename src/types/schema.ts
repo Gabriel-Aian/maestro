@@ -276,6 +276,8 @@ export interface StepResult {
   attempts: number;
   durationMs: number;
   error?: string;
+  /** Anotação livre do passo — hoje só usado pelo motor de pesquisas para registrar a query pesquisada. */
+  note?: string;
 }
 
 export interface RunResult {

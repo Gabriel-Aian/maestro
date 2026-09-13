@@ -152,6 +152,8 @@ export interface FlowStepResultView {
   attempts: number;
   durationMs: number;
   error: string | null;
+  /** Nas pesquisas, é a query de fato pesquisada nesse passo — `null` para passos de fluxo. */
+  note: string | null;
 }
 
 /** Resultado completo de uma execução — buscado sob demanda quando o job termina (evita inflar QueueEvent). Usado por fluxos e pesquisas. */

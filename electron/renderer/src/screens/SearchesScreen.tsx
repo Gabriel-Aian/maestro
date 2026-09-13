@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import type { FlowRunDetail, LoadSearchFileResult, SearchEngineOption, SearchFileView } from '../../../shared/ipc.js';
 import { StatusBadge } from '../components/StatusBadge.js';
 import { consumeJobCompletion, useJobEvents, type JobCompletion } from '../jobEvents.js';
@@ -31,6 +31,16 @@ export function SearchesScreen() {
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [jobs, setJobs] = useState<JobTracker[]>([]);
+  const [expandedJobs, setExpandedJobs] = useState<Set<string>>(new Set());
+
+  function toggleJob(jobId: string): void {
+    setExpandedJobs((prev) => {
+      const next = new Set(prev);
+      if (next.has(jobId)) next.delete(jobId);
+      else next.add(jobId);
+      return next;
+    });
+  }
 
   function applyResult(result: LoadSearchFileResult | null): void {
     if (!result) {
@@ -306,6 +316,7 @@ export function SearchesScreen() {
               <table>
                 <thead>
                   <tr>
+                    <th></th>
                     <th>Job</th>
                     <th>Status</th>
                     <th>Concluídas</th>
@@ -316,17 +327,59 @@ export function SearchesScreen() {
                   {jobs.map((job) => {
                     const ok = job.detail?.steps.filter((s) => s.status === 'success').length ?? null;
                     const total = job.detail?.steps.length ?? null;
+                    const expanded = expandedJobs.has(job.jobId);
                     return (
-                      <tr key={job.jobId}>
-                        <td className="mono">{job.jobId}</td>
-                        <td>
-                          <StatusBadge status={job.status === 'running' ? 'running' : (job.detail?.status ?? job.status)} />
-                        </td>
-                        <td>{ok !== null && total !== null ? `${ok}/${total}` : '—'}</td>
-                        <td className="text-muted">
-                          {job.detail?.blockReason ? `bloqueado: ${job.detail.blockReason}` : (job.error ?? job.detail?.error ?? '—')}
-                        </td>
-                      </tr>
+                      <Fragment key={job.jobId}>
+                        <tr>
+                          <td>
+                            {job.detail && job.detail.steps.length > 0 && (
+                              <button className="btn btn-ghost" onClick={() => toggleJob(job.jobId)}>
+                                {expanded ? '▾' : '▸'}
+                              </button>
+                            )}
+                          </td>
+                          <td className="mono">{job.jobId}</td>
+                          <td>
+                            <StatusBadge status={job.status === 'running' ? 'running' : (job.detail?.status ?? job.status)} />
+                          </td>
+                          <td>{ok !== null && total !== null ? `${ok}/${total}` : '—'}</td>
+                          <td className="text-muted">
+                            {job.detail?.blockReason ? `bloqueado: ${job.detail.blockReason}` : (job.error ?? job.detail?.error ?? '—')}
+                          </td>
+                        </tr>
+                        {expanded && job.detail && (
+                          <tr>
+                            <td colSpan={5} style={{ background: '#fafaf9', padding: 0 }}>
+                              <table>
+                                <thead>
+                                  <tr>
+                                    <th>#</th>
+                                    <th>Pesquisa</th>
+                                    <th>Status</th>
+                                    <th>Duração</th>
+                                    <th>Observação</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {job.detail.steps.map((s) => (
+                                    <tr key={s.index}>
+                                      <td>{s.index}</td>
+                                      <td className="mono">{s.note ?? '—'}</td>
+                                      <td>
+                                        <StatusBadge status={s.status} />
+                                      </td>
+                                      <td>{formatDuration(s.durationMs)}</td>
+                                      <td className="text-muted" title={s.error ?? undefined}>
+                                        {s.error ? s.error.slice(0, 60) : '—'}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     );
                   })}
                 </tbody>
