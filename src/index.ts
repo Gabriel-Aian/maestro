@@ -5,6 +5,7 @@ export { RecordingSession, materializeTimingSteps, DEFAULT_TIMING_MIN_MS, DEFAUL
 export { replayFlow, resolveVariables } from './engine/replay.js';
 export { describeCandidate } from './engine/selectors.js';
 export { runSearchBatch } from './search/runner.js';
+export { SEARCH_ENGINES, getEngine, type SearchEngineDef } from './search/engines.js';
 export {
   expandSearches,
   loadSearchFile,

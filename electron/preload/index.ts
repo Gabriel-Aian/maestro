@@ -23,8 +23,10 @@ import {
   type QueueJobView,
   type RunFlowResult,
   type RunScheduleResult,
+  type RunSearchOptions,
   type RunSearchResult,
   type ScheduleView,
+  type SearchEngineOption,
   type StatusView,
   type UpdateConfigResult,
   type UpdateStatus,
@@ -79,8 +81,9 @@ const api = {
   pickSearchFile: (): Promise<LoadSearchFileResult | null> => ipcRenderer.invoke('maestro:search:pickFile'),
   reloadSearchFile: (filePath: string): Promise<LoadSearchFileResult> => ipcRenderer.invoke('maestro:search:reload', filePath),
   openSearchFileFolder: (filePath: string): Promise<void> => ipcRenderer.invoke('maestro:search:openFolder', filePath),
-  runSearch: (filePath: string, themeIds: string[], sampleSize?: number): Promise<RunSearchResult> =>
-    ipcRenderer.invoke('maestro:search:run', { filePath, themeIds, sampleSize }),
+  runSearch: (filePath: string, options: RunSearchOptions): Promise<RunSearchResult> =>
+    ipcRenderer.invoke('maestro:search:run', { filePath, ...options }),
+  listSearchEngines: (): Promise<SearchEngineOption[]> => ipcRenderer.invoke('maestro:search:engines'),
 
   listSchedules: (): Promise<ScheduleView[]> => ipcRenderer.invoke('maestro:schedules:list'),
   pickScheduleSearchFile: (): Promise<PickScheduleSearchFileResult | null> => ipcRenderer.invoke('maestro:schedules:pickSearchFile'),

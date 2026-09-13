@@ -98,8 +98,11 @@ function expandVars(text: string, vars: Record<string, string[]> | undefined): s
  * herança `defaults → tema → query` e expandindo variáveis e repetições.
  * Temas desativados são ignorados aqui, mas permanecem no arquivo (RN-009).
  */
-export function expandSearches(file: SearchFile, opts: { themeIds?: string[]; sampleSize?: number } = {}): ResolvedSearch[] {
-  const out: ResolvedSearch[] = [];
+export function expandSearches(
+  file: SearchFile,
+  opts: { themeIds?: string[]; sampleSize?: number; engine?: string; delayRangeMs?: [number, number] } = {},
+): ResolvedSearch[] {
+  let out: ResolvedSearch[] = [];
   const filter = opts.themeIds ? new Set(opts.themeIds) : null;
 
   for (const theme of file.themes) {
@@ -114,8 +117,23 @@ export function expandSearches(file: SearchFile, opts: { themeIds?: string[]; sa
   // `undefined` (o padrão) preserva o comportamento de sempre: todas as
   // pesquisas ativas, na ordem do arquivo.
   if (opts.sampleSize !== undefined && opts.sampleSize < out.length) {
-    return sampleWithoutReplacement(out, opts.sampleSize);
+    out = sampleWithoutReplacement(out, opts.sampleSize);
   }
+
+  // `engine`/`delayRangeMs` são overrides de invocação, mesmo padrão de
+  // `themeIds`/`sampleSize`: sobrescrevem o que o arquivo declarou (defaults
+  // ou por tema) para ESTA execução, sem alterar o arquivo em disco — úteis
+  // para testar um mecanismo diferente ou um intervalo maior sem editar o
+  // JSON à mão. `getEngine` valida o id aqui, antes de qualquer job ser
+  // enfileirado (mesmo princípio de "falhar cedo" de RN-015).
+  if (opts.engine !== undefined) {
+    getEngine(opts.engine);
+    for (const search of out) search.engine = opts.engine;
+  }
+  if (opts.delayRangeMs !== undefined) {
+    for (const search of out) search.delayRange = opts.delayRangeMs;
+  }
+
   return out;
 }
 
