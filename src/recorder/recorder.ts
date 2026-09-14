@@ -9,6 +9,8 @@ export interface RecordingOptions {
   name: string;
   startUrl: string;
   viewport?: { width: number; height: number };
+  /** Chamado a cada evento bruto capturado — a GUI usa para mostrar progresso sem fazer polling. A CLI não precisa e deixa `undefined`. */
+  onEvent?: (count: number) => void;
 }
 
 export interface TimedEvent extends RawEvent {
@@ -124,6 +126,7 @@ export class RecordingSession {
     try {
       const raw = JSON.parse(payload) as RawEvent;
       this.events.push({ ...raw, frame: this.frameRef(frame), pageIndex: this.pageIndexOf(frame.page()) });
+      this.options.onEvent?.(this.events.length);
     } catch (err) {
       logger.warn({ err }, 'Evento de gravação inválido descartado');
     }
@@ -176,6 +179,12 @@ export class RecordingSession {
 
     const now = new Date().toISOString();
     const viewport = this.options.viewport ?? this.page.viewportSize() ?? { width: 1366, height: 768 };
+    // Campo de senha detectado (RNF-001): o passo fica com valor vazio e uma
+    // `note` explicando o porquê, mas isso só é visível abrindo o fluxo — sem
+    // marcar `needsReview`, o alerta "⚠ requer revisão" já usado para
+    // seletores de fallback (RN-006) não apareceria aqui, e o fluxo rodaria
+    // "com sucesso" digitando uma string vazia no campo de senha.
+    const needsReview = steps.some((s) => s.type === 'type' && s.redacted);
 
     const flow = FlowSchema.parse({
       schemaVersion: 1,
@@ -187,7 +196,7 @@ export class RecordingSession {
       steps,
       createdAt: this.startedAt,
       updatedAt: now,
-      needsReview: false,
+      needsReview,
     } satisfies Record<string, unknown>);
 
     logger.info({ flowId: flow.id, steps: flow.steps.length, rawEvents: this.events.length }, 'Gravação encerrada');
@@ -327,11 +336,25 @@ export function compileEvents(events: TimedEvent[]): FlowStep[] {
       const pressEnter = Boolean(after && after.kind === 'keydown' && after.key === 'Enter' && sameElement(last, after));
       if (pressEnter) i = j + 1;
 
-      push(
-        { type: 'type', selectors: mapCandidates(last.selectors), value: last.value ?? '', clearFirst: true, pressEnter } as Partial<FlowStep>,
-        last,
-        previousTime,
-      );
+      // `redacted` é uma propriedade do CAMPO (tipo do input), não da tecla —
+      // vale para toda a sequência coalescida, então checar só `last` basta.
+      const redacted = Boolean(last.redacted);
+      const typeStep: Partial<FlowStep> = {
+        type: 'type',
+        selectors: mapCandidates(last.selectors),
+        value: redacted ? '' : last.value ?? '',
+        clearFirst: true,
+        pressEnter,
+        redacted,
+      } as Partial<FlowStep>;
+      // `note` só entra no objeto quando redigido — incluir a chave com
+      // `undefined` no caso comum apagaria o "intervalo observado" que
+      // `push()` já calcula por padrão (ver seu `...partial` no final).
+      if (redacted) {
+        (typeStep as { note?: string }).note =
+          'Campo de senha — o valor não foi gravado (RNF-001). Edite este passo para usar uma variável sensível ({{nome}}) antes de rodar o fluxo.';
+      }
+      push(typeStep, last, previousTime);
       continue;
     }
 

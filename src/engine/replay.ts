@@ -406,11 +406,13 @@ async function performStep(
     case 'type': {
       const { locator, candidateIndex } = await resolveElement(scope, step.selectors, timeout);
       const value = interpolate(step.value, vars);
-      if (step.clearFirst) {
-        await locator.fill(value, { timeout });
-      } else {
-        await locator.pressSequentially(value, { timeout, delay: 25 });
-      }
+      // `fill()` define o valor inteiro de uma vez, sem nenhum evento
+      // intermediário visível — pedido explícito do usuário: poder observar a
+      // digitação acontecendo, tecla por tecla, é o que torna debugar um
+      // fluxo em modo visível (`--headed`) praticável. `clearFirst` só decide
+      // se o campo é esvaziado antes; a digitação em si é sempre simulada.
+      if (step.clearFirst) await locator.fill('', { timeout });
+      await locator.pressSequentially(value, { timeout, delay: 25 });
       if (step.pressEnter) await locator.press('Enter');
       return candidateIndex;
     }

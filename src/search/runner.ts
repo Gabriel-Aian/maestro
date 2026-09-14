@@ -50,7 +50,7 @@ export async function runSearchBatch(options: SearchBatchOptions): Promise<RunRe
     }
 
     if (blockedThemes.has(search.themeId)) {
-      steps.push(skipped(i, `Tema "${search.themeName}" bloqueado anteriormente neste lote.`));
+      steps.push(skipped(i, `Tema "${search.themeName}" bloqueado anteriormente neste lote.`, search.query));
       continue;
     }
 
@@ -131,6 +131,7 @@ async function runSingleSearch(
           attempts: attempt,
           durationMs: Date.now() - startedAt,
           error: `BLOQUEADO (${detection.reason}): ${detection.evidence}`,
+          note: search.query,
         };
       }
 
@@ -148,6 +149,7 @@ async function runSingleSearch(
         degraded: false,
         attempts: attempt,
         durationMs: Date.now() - startedAt,
+        note: search.query,
       };
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
@@ -164,10 +166,11 @@ async function runSingleSearch(
     attempts: maxAttempts,
     durationMs: Date.now() - startedAt,
     error: lastError,
+    note: search.query,
   };
 }
 
-function skipped(index: number, reason: string): StepResult {
+function skipped(index: number, reason: string, query: string): StepResult {
   return {
     index,
     type: 'navigate',
@@ -177,5 +180,6 @@ function skipped(index: number, reason: string): StepResult {
     attempts: 0,
     durationMs: 0,
     error: reason,
+    note: query,
   };
 }

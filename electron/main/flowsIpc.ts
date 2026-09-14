@@ -82,6 +82,7 @@ function toRunDetail(row: Record<string, unknown>): FlowRunDetail {
         attempts: Number(s.attempts),
         durationMs: Number(s.durationMs),
         error: s.error ? String(s.error) : null,
+        note: s.note ? String(s.note) : null,
       }),
     ),
   };

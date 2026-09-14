@@ -26,6 +26,27 @@ describe('compileEvents — limpeza da gravação bruta', () => {
     expect(steps[0]).toMatchObject({ type: 'type', value: 'ana@x.com', clearFirst: true });
   });
 
+  it('nunca grava o valor de um campo de senha (RNF-001), mesmo colado (paste dispara "input" igual digitação)', () => {
+    const steps = compileEvents([
+      ev({ kind: 'input', id: 'senha', t: 1000, value: 'h', redacted: true }),
+      ev({ kind: 'input', id: 'senha', t: 1050, value: 'hunter2', redacted: true }),
+    ]);
+
+    expect(steps).toHaveLength(1);
+    expect(steps[0]).toMatchObject({ type: 'type', value: '', redacted: true });
+    expect((steps[0] as { note?: string }).note).toMatch(/senha/i);
+  });
+
+  it('preserva a nota de intervalo observado em campos normais (não deixa o tratamento de senha vazar "note: undefined" para o caso comum)', () => {
+    const steps = compileEvents([
+      ev({ kind: 'click', id: 'outro', t: 0 }),
+      ev({ kind: 'input', id: 'email', t: 5000, value: 'ana@x.com' }),
+    ]);
+
+    expect(steps.at(-1)).toMatchObject({ type: 'type', redacted: false });
+    expect((steps.at(-1) as { note?: string }).note).toMatch(/Intervalo observado/);
+  });
+
   it('descarta o clique de foco que antecede a digitação', () => {
     const steps = compileEvents([
       ev({ kind: 'click', id: 'email', t: 1000 }),
